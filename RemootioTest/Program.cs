@@ -43,7 +43,7 @@ namespace RemootioTest
             };
 
 
-            TestACTION(test1);
+            //TestACTION(test1);
             TestACTION(test2);
 
             // Now test Remootio client
@@ -58,12 +58,12 @@ namespace RemootioTest
 
         static void TestACTION(TestData t)
         {
-            AesEncryption aes = new AesEncryption(base64Key: t.APISessionKey, hexKey: t.APIAuthKey);
+            AesEncryption aes = new AesEncryption(base64Key: t.APISessionKey, APIAuthKey: t.APIAuthKey);
 
             // Test MakeEncr directly
             ACTION query = new ACTION(type.QUERY, t.lastActionID + 1);
 
-            encr encr1 = MakeEncr(query, aes, t.APIAuthKey, t.iv);
+            encr encr1 = MakeEncr(query, aes/*, t.APIAuthKey*/, t.iv);
 
             Debug.Assert(encr1.payload == t.expected_payload);
             Debug.Assert(encr1.mac == t.expected_mac);

@@ -28,7 +28,6 @@ namespace Remootio
         int pingMsec;
 
         AesEncryption aes;
-        int _ActionId = 0;
         bool authenticated = false;
 
         string APISecretKey = "B48C7A34CC64F9E421A64985328619AB6CF1878ECD1649F5E8322F1FE28C93C8";  // TEMP
@@ -96,7 +95,7 @@ namespace Remootio
             if (websocket != null)
                 Stop();
 
-            aes = new AesEncryption(hexKey: APISecretKey);
+            aes = new AesEncryption(APISecretKey: APISecretKey);
 
             websocket = new WebSocket(url);
             websocket.Opened += new EventHandler(websocket_Opened);
@@ -215,22 +214,24 @@ namespace Remootio
 
                 case type.ERROR:
                 case type.INPUT_ERROR:
-                    var msg1 = JsonConvert.DeserializeObject<ERROR>(e.Message);
-                    Console.WriteLine($"ERROR: {msg1.errorMessage}");
+                    var err = JsonConvert.DeserializeObject<ERROR>(e.Message);
+                    Console.WriteLine($"ERROR: {err.errorMessage}");
                     break;
 
                 case type.ENCRYPTED:
-                    var msg2 = JsonConvert.DeserializeObject<ENCRYPTED>(e.Message);
+                    var enc = JsonConvert.DeserializeObject<ENCRYPTED>(e.Message);
                     //Console.WriteLine($"ENCRYPTED: {msg2.data.iv}");
-                    Challenge challenge = aes.DecryptStringFromBytes<Challenge>(msg2.data.payload, msg2.data.iv);
-                    if (challenge.challenge != null)
+                    Challenge challenge = aes.DecryptStringFromBytes<Challenge>(enc.data.payload, enc.data.iv);
+                    if (challenge?.challenge != null)
                     {
                         ActionId = challenge.challenge.initialActionId;
-                        var APISessionKey = challenge.challenge.sessionKey;
+                        string APISessionKey = challenge.challenge.sessionKey;
                         // After authentication use new APISessionKey for encryption
                         // APIAuthKey is used for HMAC calculation
-                        aes = new AesEncryption(base64Key: APISessionKey, hexKey: APIAuthKey);
-                        Console.WriteLine($"initialActionId: {_ActionId}");
+                        aes = new AesEncryption(base64Key: APISessionKey, APIAuthKey: APIAuthKey);
+
+                        IncrActionId(); // Looks like need to increment?
+                        Console.WriteLine($"initialActionId: {ActionId}");
                     }
 
                     // Reccomended after AUTH send QUERY
@@ -249,6 +250,7 @@ namespace Remootio
 
         #region Send
 
+        object websocket_lock = new object();
 
         private void Send(object msg)
         {
@@ -256,7 +258,7 @@ namespace Remootio
             {
                 string json = JsonConvert.SerializeObject(msg);
                 Console.WriteLine($"Send: {json}");
-                lock (websocket)
+                lock (websocket_lock)
                 {
                     websocket.Send(json);
                     return;
@@ -296,19 +298,7 @@ namespace Remootio
         /// </summary>
         private void SendQuery()
         {
-            SendAction(new QUERY(ActionId, aes, sIV));
-        }
-
-
-        /// <summary>
-        /// Just add MAC (Message Authentication Code) to action encrypted data
-        /// </summary>
-        /// <param name="action"></param>
-        private void SendAction(E_ACTION action)
-        {
-            // TEMP - TODO: doco says that Key should be "API Auth Key"
-            //action.data.mac = AesEncryption.StringHash(action.unencrypted_paylopad, APISecretKey);
-            Send(action);
+            Send(new QUERY(ActionId, aes, sIV));
         }
 
 
@@ -321,12 +311,14 @@ namespace Remootio
         /// <param name="APIAuthKey"></param>
         /// <param name="iv">Only for testing, normally pass null to generate</param>
         /// <returns></returns>
-        public static encr MakeEncr(ACTION query, AesEncryption aes, string APIAuthKey, string iv = null)
+        public static encr MakeEncr(ACTION query, AesEncryption aes, string iv = null)
         {
             if (aes == null)
                 throw new ArgumentNullException("aes");
 
             string payload = JsonConvert.SerializeObject(query);
+
+            Console.WriteLine($"ACTION: {payload}, APIAuthKey: {aes.APIAuthKey}, iv: {iv}");
 
             // create the JSON string for the HMAC calculation
             encr data = new encr()
@@ -338,7 +330,7 @@ namespace Remootio
             // Pass NullValueHandling.Ignore to ignore null data.mac above
             string json = JsonConvert.SerializeObject(data, jss);
 
-            data.mac = AesEncryption.StringHash(json, APIAuthKey);
+            data.mac = aes.StringHash(json);
 
             Console.WriteLine($"ACTION: {json}, mac: {data.mac}");
 
@@ -501,7 +493,7 @@ namespace Remootio
             [JsonConstructor]
             public ACTION(type type, int id)
             {
-                Console.WriteLine($"ACTION {type}, {id}");
+                Console.WriteLine($"\nACTION: '{type}', id {id}");
                 action = new _ACTION(type, id);
             }
 
@@ -525,7 +517,7 @@ namespace Remootio
             {
                 ACTION action = new ACTION(type, id);
 
-                data = MakeEncr(action, aes, aes.APISecretKey, sIV);
+                data = MakeEncr(action, aes, sIV);
             }
         }
 

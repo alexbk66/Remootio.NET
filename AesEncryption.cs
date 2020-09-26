@@ -43,12 +43,10 @@ namespace Encrypt
         }
 
 
-        /// <summary>
-        /// Keep APIAuthKey for calculating HMAC
-        /// </summary>
-        public string APISecretKey { get; private set; }
-
         #endregion Properties
+
+
+        #region Methods
 
 
         /// <summary>
@@ -57,8 +55,9 @@ namespace Encrypt
         /// After authenticated - Session Key
         /// </summary>
         /// <param name="base64Key">Session Key</param>
-        /// <param name="hexKey">APISecretKey</param>
-        public AesEncryption(string base64Key = null, string hexKey = null)
+        /// <param name="APISecretKey">APISecretKey (HEX)</param>
+        /// <param name="APIAuthKey">APISecretKey</param>
+        public AesEncryption(string base64Key = null, string APISecretKey = null, string APIAuthKey = null)
         {
             if (base64Key != null)
             {
@@ -66,11 +65,11 @@ namespace Encrypt
             }
             else
             {
-                this.Key = StringToByteArray(hexKey);
+                this.Key = StringToByteArray(APISecretKey);
             }
 
-            // Keep APIAuthKey for calculating HMAC
-            APISecretKey = hexKey;
+            // Calculate HMAC-SHA256 using API Auth Key
+            this.APIAuthKey = APIAuthKey;
         }
 
 
@@ -89,9 +88,26 @@ namespace Encrypt
         }
 
 
+        #endregion Methods
+
+
+        #region HMAC
+
+        public string APIAuthKey;
+
+        /// <summary>
+        /// The MAC to calculate is a HMAC-SHA256 using API Auth Key
+        /// </summary>
+        /// <param name="paylaoad"></param>
+        /// <param name="Key"></param>
+        /// <returns></returns>
+        public string StringHash(string paylaoad)
+        {
+            return StringHash(paylaoad, APIAuthKey);
+        }
+
         static public byte[] ByteHash(string paylaoad, byte[] Key)
         {
-            // TEMP - TODO: doco says that Key should be "API Auth Key"
             HMACSHA256 hmac = new HMACSHA256(Key);
             byte[] buffer = Encoding.ASCII.GetBytes(paylaoad);
             return hmac.ComputeHash(buffer);
@@ -103,6 +119,12 @@ namespace Encrypt
             byte[] bHash = ByteHash(paylaoad, Key);
             return Convert.ToBase64String(bHash);
         }
+
+
+        #endregion HMAC
+
+
+        #region Encrypt
 
 
         /// <summary>
@@ -119,8 +141,6 @@ namespace Encrypt
                 throw new ArgumentNullException("plainText");
             if (Key == null || Key.Length <= 0)
                 throw new ArgumentNullException("Key");
-            //if (IV == null || IV.Length <= 0)
-            //    throw new ArgumentNullException("IV");
 
             // Create an AesCryptoServiceProvider object
             // with the specified key and IV.
@@ -134,6 +154,8 @@ namespace Encrypt
                     aesAlg.GenerateIV();
 
                 this.IV = aesAlg.IV;
+
+                Console.WriteLine($"Encrypt: {plainText}, Key: {Convert.ToBase64String(Key)}, IV: {Convert.ToBase64String(IV)}");
 
                 // Create an encryptor to perform the stream transform.
                 ICryptoTransform encryptor = aesAlg.CreateEncryptor(aesAlg.Key, aesAlg.IV);
@@ -168,12 +190,16 @@ namespace Encrypt
                 Key = StringToByteArray(sKey);
 
             byte[] iv = (!String.IsNullOrEmpty(sIV))? Convert.FromBase64String(sIV) : null;
-    
             byte[] encrypted = EncryptStringToBytes(plainText, Key, iv);
 
             return Convert.ToBase64String(encrypted);
         }
 
+
+        #endregion Encrypt
+
+
+        #region Decrypt
 
 
         /// <summary>
@@ -201,7 +227,7 @@ namespace Encrypt
         public T DecryptStringFromBytes<T>(string cipherText, string IV)
         {
             string json = DecryptStringFromBytes(cipherText, IV);
-
+            Console.WriteLine($"Decrypted payload: {json}, IV: '{IV}'");
             return JsonConvert.DeserializeObject<T>(json);
         }
 
@@ -266,5 +292,7 @@ namespace Encrypt
                 }
             }
         }
+
+        #endregion Decrypt
     }
 }
