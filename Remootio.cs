@@ -22,7 +22,7 @@ namespace Remootio
         #region Properties
 
         string url;
-        const string testurl = "ws://192.168.1.5:8080";
+        const string testurl = "ws://192.168.1.5:8080";  // TEMP
         WebSocket websocket;
         Timer pingTimer;
         int pingMsec;
@@ -35,22 +35,27 @@ namespace Remootio
         string APIAuthKey = "EAF97466F0DB4B7BA11AEC9DFFAFBA0D6670FF13FD89377527F104FB5AB62414";  // TEMP
 
         /// <summary>
-        /// Each command the API client sends to Remootio must contain an acionId
-        /// that is the last action id(denoted as lastActionId) incremented by
-        /// one(and truncated to 31bits)"
+        /// Should be null normally - then IV will be generated in EncryptStringToBytes
         /// </summary>
-        int ActionId
+        string sIV = "9FbUN/uLWXpQTLpnI56P7A==";  // TEMP
+
+
+        /// <summary>
+        /// Each command the API client sends to Remootio must contain an acionId
+        /// that is the last action id(denoted as lastActionId)
+        /// incremented by one(and truncated to 31bits)"
+        /// </summary>
+        int ActionId { get; set; }
+
+
+        /// <summary>
+        /// TEMP - TODO - when recived reply for the IncrActionId - then increment
+        /// </summary>
+        void IncrActionId()
         {
-            get
-            {
-                // Increment, truncated to 31 bits
-                _ActionId = (_ActionId + 1) % 0x7FFFFFFF;
-                return _ActionId;
-            }
-
-            set => _ActionId = value;
+            // incremented by one(and truncated to 31bits)"
+            ActionId = (ActionId + 1) % 0x7FFFFFFF;
         }
-
 
         #endregion Properties
 
@@ -291,7 +296,7 @@ namespace Remootio
         /// </summary>
         private void SendQuery()
         {
-            SendAction(new QUERY(ActionId, aes));
+            SendAction(new QUERY(ActionId, aes, sIV));
         }
 
 
@@ -449,14 +454,26 @@ namespace Remootio
 
         protected class QUERY : E_ACTION
         {
+            /// <summary>
+            /// 
+            /// </summary>
+            /// <param name="id">ActionID</param>
+            /// <param name="aes">AesEncryption</param>
+            /// <param name="sIV">Only for testing, normally pass null to generate</param>
             [JsonConstructor]
-            public QUERY(int id, AesEncryption aes)
-                : base(type.QUERY, id, aes)
+            public QUERY(int id, AesEncryption aes, string sIV = null)
+                : base(type.QUERY, id, aes, sIV)
             {
             }
         }
 
 
+        /// <summary>
+        /// ACTION.action field definition
+        /// If derive from BASE - then the order in json string changes
+        /// from "type, id" to "id, type" - which affects encryption?
+        /// {"action":{"type":"QUERY","id":1836946866}}
+        /// </summary>
         public class _ACTION// : BASE
         {
             [JsonConstructor]
@@ -469,9 +486,16 @@ namespace Remootio
 
             [JsonConverter(typeof(StringEnumConverter))]
             public type type;
-            public int id; // Action ID
+
+            // Action ID
+            public int id;
         }
 
+
+        /// <summary>
+        /// Unencrypted data.payload of the frame
+        /// {"action":{"type":"QUERY","id":1836946866}}
+        /// </summary>
         public class ACTION
         {
             [JsonConstructor]
@@ -485,13 +509,23 @@ namespace Remootio
         }
 
 
+        /// <summary>
+        /// Encrypted wrapper for Action
+        /// </summary>
         public class E_ACTION : ENCRYPTED
         {
-            public E_ACTION(type type, int id, AesEncryption aes)
+            /// <summary>
+            /// Ctor - create encr data field
+            /// </summary>
+            /// <param name="type"></param>
+            /// <param name="id">Action ID</param>
+            /// <param name="aes">AesEncryption</param>
+            /// <param name="sIV">Only for testing, normally pass null to generate</param>
+            public E_ACTION(type type, int id, AesEncryption aes, string sIV = null)
             {
                 ACTION action = new ACTION(type, id);
 
-                data = MakeEncr(action, aes, aes.APISecretKey);
+                data = MakeEncr(action, aes, aes.APISecretKey, sIV);
             }
         }
 

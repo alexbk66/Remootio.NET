@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Diagnostics;
 
 using Encrypt;
 using Remootio;
@@ -20,15 +21,31 @@ namespace RemootioTest
             string APISessionKey = "yzEI7RWCjYDEwFrgc5YrmWo82kXEjFNStbtN+wFM2Qk=";
             string iv = "vz3r424R6v9XFchkkgWQTw==";
 
+            string expected_payload = "L6eTyvyY/q4I7oDAfdeDyz17x0vMUqmqvnCYl73zG2UxnYpIKVIQ0DooAWxcm3WT";
+            string expected_mac = "legB+2ZnikMtX54VpkPVc8P7o17s61y1JqGDvFrxbts=";
+
             AesEncryption aes = new AesEncryption(base64Key: APISessionKey, hexKey: APIAuthKey);
 
-            ACTION query = new ACTION(type.QUERY, 808411243 + 1); // ???
+            int lastActionID = 808411243;
 
-            encr encr = MakeEncr(query, aes, APIAuthKey, iv);
+            // Test MakeEncr directly
+            ACTION query = new ACTION(type.QUERY, lastActionID + 1); // ???
+
+            encr encr1 = MakeEncr(query, aes, APIAuthKey, iv);
+
+            Debug.Assert(encr1.payload == expected_payload);
+            Debug.Assert(encr1.mac == expected_mac);
+
+            // Test E_ACTION wrapper - should produce same "encr"
+            E_ACTION e_ACTION = new E_ACTION(type.QUERY, lastActionID + 1, aes, iv);
+
+            encr encr2 = e_ACTION.data;
+
+            Debug.Assert(encr2.payload == expected_payload);
+            Debug.Assert(encr2.mac == expected_mac);
 
 
-
-
+            // Now test Remootio client
             var r = new Remootio.Remootio();
 
             while (true)
