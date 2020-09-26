@@ -266,8 +266,7 @@ namespace Remootio
                 Console.WriteLine($"Exception {ex}");
             }
 
-            Stop();
-            Start();
+            Restart();
         }
 
 
@@ -306,6 +305,48 @@ namespace Remootio
             //action.data.mac = AesEncryption.StringHash(action.unencrypted_paylopad, APISecretKey);
             Send(action);
         }
+
+
+
+        /// <summary>
+        /// Create "encr" data for encrypted ACTION
+        /// </summary>
+        /// <param name="obj"></param>
+        /// <param name="aes"></param>
+        /// <param name="APIAuthKey"></param>
+        /// <param name="iv">Only for testing, normally pass null to generate</param>
+        /// <returns></returns>
+        public static encr MakeEncr(ACTION query, AesEncryption aes, string APIAuthKey, string iv = null)
+        {
+            if (aes == null)
+                throw new ArgumentNullException("aes");
+
+            string payload = JsonConvert.SerializeObject(query);
+
+            // create the JSON string for the HMAC calculation
+            encr data = new encr()
+            {
+                payload = aes.EncryptStringToBytes(payload, sIV: iv),
+                iv = aes.sIV,
+            };
+
+            // Pass NullValueHandling.Ignore to ignore null data.mac above
+            string json = JsonConvert.SerializeObject(data, jss);
+
+            data.mac = AesEncryption.StringHash(json, APIAuthKey);
+
+            Console.WriteLine($"ACTION: {json}, mac: {data.mac}");
+
+            return data;
+        }
+
+
+        /// <summary>
+        /// Pass NullValueHandling.Ignore to ignore null data.mac above
+        /// data.mac above will be set after SerializeObject
+        /// </summary>
+        static JsonSerializerSettings jss = new JsonSerializerSettings() { NullValueHandling = NullValueHandling.Ignore };
+
 
         #endregion Send
 
@@ -385,14 +426,10 @@ namespace Remootio
             public encr data;
         }
 
-        public class encr_base
+        public class encr
         {
             public string iv;
             public string payload;
-        }
-
-        public class encr : encr_base
-        {
             public string mac;
         }
 
@@ -458,40 +495,6 @@ namespace Remootio
             }
         }
 
-
-
-        /// <summary>
-        /// 
-        /// </summary>
-        /// <param name="obj"></param>
-        /// <param name="aes"></param>
-        /// <param name="APIAuthKey"></param>
-        /// <param name="iv">Only for testing, normally ass null to generate</param>
-        /// <returns></returns>
-        public static encr MakeEncr(object obj, AesEncryption aes, string APIAuthKey, string iv = null)
-        {
-            if (aes == null)
-                throw new ArgumentNullException("aes");
-
-            string payload = JsonConvert.SerializeObject(obj);
-
-            // create the JSON string for the HMAC calculation
-            encr data = new encr()
-            {
-                payload = aes.EncryptStringToBytes(payload, sIV: iv),
-                iv = aes.sIV,
-            };
-
-            string json = JsonConvert.SerializeObject(data, jss);
-
-            data.mac = AesEncryption.StringHash(json, APIAuthKey);
-
-            Console.WriteLine($"ACTION: {json}, mac: {data.mac}");
-
-            return data;
-        }
-
-        static JsonSerializerSettings jss = new JsonSerializerSettings() { NullValueHandling = NullValueHandling.Ignore };
 
         #endregion ACTIONS
 

@@ -22,7 +22,7 @@ namespace RemootioTest
 
             AesEncryption aes = new AesEncryption(base64Key: APISessionKey, hexKey: APIAuthKey);
 
-            ACTION query = new ACTION(type.QUERY, 808411243);
+            ACTION query = new ACTION(type.QUERY, 808411243 + 1); // ???
 
             encr encr = MakeEncr(query, aes, APIAuthKey, iv);
 
