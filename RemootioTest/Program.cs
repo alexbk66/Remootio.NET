@@ -60,6 +60,8 @@ namespace RemootioTest
         {
             AesEncryption aes = new AesEncryption(base64Key: t.APISessionKey, APIAuthKey: t.APIAuthKey);
 
+            Console.WriteLine($"\nTest MakeEncr");
+
             // Test MakeEncr directly
             ACTION query = new ACTION(type.QUERY, t.lastActionID + 1);
 
@@ -68,6 +70,7 @@ namespace RemootioTest
             Debug.Assert(encr1.payload == t.expected_payload);
             Debug.Assert(encr1.mac == t.expected_mac);
 
+            Console.WriteLine($"\nTest E_ACTION wrapper");
             // Test E_ACTION wrapper - should produce same "encr"
             E_ACTION e_ACTION = new E_ACTION(type.QUERY, t.lastActionID + 1, aes, t.iv);
 
@@ -75,6 +78,7 @@ namespace RemootioTest
 
             Debug.Assert(encr2.payload == t.expected_payload);
             Debug.Assert(encr2.mac == t.expected_mac);
+            Console.WriteLine($"\nDone\n");
         }
     }
 

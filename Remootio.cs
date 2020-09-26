@@ -188,7 +188,7 @@ namespace Remootio
         /// <param name="e"></param>
         private void websocket_Error(object sender, ErrorEventArgs e)
         {
-            Console.WriteLine($"Error {e.Exception}");
+            Console.WriteLine($"ERROR {e.Exception}");
 
             Restart();
         }
@@ -203,11 +203,20 @@ namespace Remootio
         {
             Console.WriteLine($"Received {e.Message}");
 
-            BASE msg = JsonConvert.DeserializeObject<BASE>(e.Message);
+            // Get type first
+            BASE msg;
 
-            var type = msg.type;
+            try
+            {
+                msg = JsonConvert.DeserializeObject<BASE>(e.Message);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"ERROR: Couldn't deserialize '{e.Message}': {ex}");
+                return;
+            }
 
-            switch (type)
+            switch (msg.type)
             {
                 case type.PONG:
                     return;
@@ -218,30 +227,43 @@ namespace Remootio
                     Console.WriteLine($"ERROR: {err.errorMessage}");
                     break;
 
+                case type.SERVER_HELLO:
+                    var hello = JsonConvert.DeserializeObject<SERVER_HELLO>(e.Message);
+                    Console.WriteLine($"HELLO: api: {hello.apiVersion}, {hello.message}");
+                    break;
+
                 case type.ENCRYPTED:
                     var enc = JsonConvert.DeserializeObject<ENCRYPTED>(e.Message);
-                    //Console.WriteLine($"ENCRYPTED: {msg2.data.iv}");
-                    Challenge challenge = aes.DecryptStringFromBytes<Challenge>(enc.data.payload, enc.data.iv);
-                    if (challenge?.challenge != null)
-                    {
-                        ActionId = challenge.challenge.initialActionId;
-                        string APISessionKey = challenge.challenge.sessionKey;
-                        // After authentication use new APISessionKey for encryption
-                        // APIAuthKey is used for HMAC calculation
-                        aes = new AesEncryption(base64Key: APISessionKey, APIAuthKey: APIAuthKey);
-
-                        IncrActionId(); // Looks like need to increment?
-                        Console.WriteLine($"initialActionId: {ActionId}");
-                    }
-
-                    // Reccomended after AUTH send QUERY
-                    SendQuery();
+                    HandleChallenge(enc);
                     break;
 
                 default:
-                    Console.WriteLine($"unknown msg type {type}");
+                    Console.WriteLine($"unknown msg type {msg.type}");
                     break;
             }
+        }
+
+
+        void HandleChallenge(ENCRYPTED enc)
+        {
+            //Console.WriteLine($"ENCRYPTED: {msg2.data.iv}");
+            Challenge challenge = aes.DecryptStringFromBytes<Challenge>(enc.data.payload, enc.data.iv);
+            if (challenge?.challenge != null)
+            {
+                ActionId = challenge.challenge.initialActionId;
+                string APISessionKey = challenge.challenge.sessionKey;
+                // After authentication use new APISessionKey for encryption
+                // APIAuthKey is used for HMAC calculation
+                aes = new AesEncryption(base64Key: APISessionKey, APIAuthKey: APIAuthKey);
+
+                IncrActionId(); // Looks like need to increment?
+                Console.WriteLine($"initialActionId: {ActionId}");
+            }
+
+            SendHello();
+
+            // Reccomended after AUTH send QUERY
+            SendQuery();
         }
 
 
@@ -282,7 +304,7 @@ namespace Remootio
         /// </summary>
         private void SendPing()
         {
-            Send(ping);
+            Send(new PING());
         }
 
         /// <summary>
@@ -290,7 +312,15 @@ namespace Remootio
         /// </summary>
         private void SendAuth()
         {
-            Send(auth);
+            Send(new AUTH());
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        private void SendHello()
+        {
+            Send(new HELLO());
         }
 
         /// <summary>
@@ -350,6 +380,141 @@ namespace Remootio
 
         #region JSON classes
 
+        /// <summary>
+        /// Message types
+        /// </summary>
+        public enum type
+        {
+            NOTSET,
+
+            // The API client sends this to keep the connection alive. It is recommended to send one PING frame to the
+            // Remootio device every 60-90 seconds and also check for the PONG response to detect a broken connection.
+            // Direction: API client → Remootio device
+            PING,
+
+            // Response: Remootio device → API client
+            PONG,
+
+            // The Remootio device sends error frames to the API client to indicate various errors
+            // Direction: Remootio device → API client
+            ERROR,
+
+            // Note: not documented
+            INPUT_ERROR,
+
+            // The API client can send this frame to check the version of the Websocket API running on the Remootio device
+            // Direction: API client → Remootio device
+            HELLO,
+
+            // Response: Remootio device → API client
+            SERVER_HELLO,
+
+            // The API client sends the AUTH frame to start the authentication flow
+            // Direction: API client → Remootio device
+            AUTH,
+
+            //
+            ENCRYPTED,
+
+            // The API client sends this action to get the current state of the gate or garage door (open/closed)
+            // Direction: API client → Remootio device
+            QUERY,
+
+            // The API client sends this action to trigger the control output of the Remootio device
+            // and thus operate the gate or garage door
+            // Direction: API client → Remootio device
+            TRIGGER,
+
+            // The API client sends this action to open the gate or the garage door. 
+            // This will trigger Remootio's control output only if the gate or garage door status is "closed"
+            // Direction: API client → Remootio device
+            OPEN,
+
+            // The API client sends this action to close the gate or the garage door. 
+            // This will trigger Remootio's control output only if the gate or garage door status is "open"
+            // Direction: API client → Remootio device
+            CLOSE,
+
+            // The API client sends this action to restart the Remootio device. The UNENCRYPTED_PAYLOAD of the
+            // action is shown below (the action id also needs to be calculated id = lastActionId % 0x7FFFFFFF) 
+            // Direction: API client → Remootio device
+            RESTART,
+
+            // Remootio sends the following event if the status of the gate or garage door has changed
+            // (from "open" to "closed" or from "closed" to "open"). 
+            // This is the only event that is sent if the API is enabled without logging.
+            // It is also sent if the API is enabled with logging. 
+            // Direction: Remootio device → API client
+            StateChange,
+
+            // Remootio sends the following event if it any key has operated the Remootio device
+            // (triggered the control output)
+            // Direction: Remootio device → API client
+            RelayTrigger,
+
+            // Remootio sends the following event if any key has connected to the Remootio device.
+            // Direction: Remootio device → API client
+            Connected,
+
+            // Remootio sends the following event if the gate or garage door has been left open for some time
+            // Direction: Remootio device → API client
+            LeftOpen,
+
+            // Remootio sends the following event if the access rights or notification settings for any key have been changed
+            // Direction: Remootio device → API client
+            KeyManagement,
+
+            // Remootio sends the following event if it was restarted
+            // This is only sent if the API is enabled with logging
+            // Direction: Remootio device → API client
+            Restart,
+
+            // Remootio sends the following event if the manual button was pushed
+            // This is only sent if the API is enabled with logging
+            // Direction: Remootio device → API client
+            ManualButtonPushed,
+
+            // Remootio sends the following event if the manual button was enabled
+            // This is only sent if the API is enabled with logging
+            // Direction: Remootio device → API client
+            ManualButtonEnabled,
+
+            // Remootio sends the following event if the manual button was disabled. 
+            // This is only sent if the API is enabled with logging
+            // Direction: Remootio device → API client
+            ManualButtonDisabled,
+
+            // Remootio sends the following event if the doorbell was pushed. 
+            // This is only sent if the API is enabled with logging
+            // Direction: Remootio device → API client
+            DoorbellPushed,
+
+            // Remootio sends the following event if the doorbell was enabled
+            // This is only sent if the API is enabled with logging
+            // Direction: Remootio device → API client
+            DoorbellEnabled,
+
+            // Remootio sends the following event if the doorbell was disabled
+            // This is only sent if the API is enabled with logging
+            // Direction: Remootio device → API client
+            DoorbellDisabled,
+
+            // Remootio sends the following event if the status sensor was enabled. 
+            // This is only sent if the API is enabled with logging
+            // Direction: Remootio device → API client
+            SensorEnabled,
+
+            // Remootio sends the following event if the logic of the status sensor was flipped
+            // This is only sent if the API is enabled with logging
+            // Direction: Remootio device → API client
+            SensorFlipped,
+
+            // Remootio sends the following event if the status sensor was disabled
+            // This is only sent if the API is enabled with logging
+            // Direction: Remootio device → API client
+            SensorDisabled,
+
+        }
 
 
         public class _Challenge
@@ -367,19 +532,6 @@ namespace Remootio
             public _Challenge challenge { get; set; }
         }
 
-
-        public enum type
-        {
-            NOTSET,
-            PING,
-            PONG,
-            ERROR,
-            INPUT_ERROR, // Note: not documented
-            HELLO,
-            AUTH,
-            ENCRYPTED,
-            QUERY,
-        }
 
         [Serializable]
         public class BASE
@@ -404,15 +556,17 @@ namespace Remootio
             public PING() : base(type.PING) { }
         }
 
-        static PING ping = new PING();
-
 
         protected class AUTH : BASE
         {
             public AUTH() : base(type.AUTH) { }
         }
 
-        static AUTH auth = new AUTH();
+
+        protected class HELLO : BASE
+        {
+            public HELLO() : base(type.HELLO) { }
+        }
 
 
         public class ENCRYPTED : BASE
@@ -438,6 +592,15 @@ namespace Remootio
             public ERROR() : base(type.ERROR) { }
 
             public string errorMessage;
+        }
+
+        protected class SERVER_HELLO : BASE
+        {
+            [JsonConstructor]
+            public SERVER_HELLO() : base(type.SERVER_HELLO) { }
+
+            public int apiVersion;
+            public string message;
         }
 
 
