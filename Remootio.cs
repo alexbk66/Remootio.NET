@@ -21,20 +21,12 @@ namespace Remootio
     {
         #region Properties
 
-        [JsonProperty]
-        public string url { set; get; }
-
         /// <summary>
         /// To keep connection alive need to send PING every 60-90 sec
         /// </summary>
         [JsonProperty]
         public int PingSec { set; get; } = 60;
 
-        /// <summary>
-        /// Always 8080
-        /// </summary>
-        [JsonProperty]
-        public int Port { set; get; } = 8080;
 
         [JsonProperty]
         public string APISecretKey { set; get; } = "B48C7A34CC64F9E421A64985328619AB6CF1878ECD1649F5E8322F1FE28C93C8";  // TEMP
@@ -42,17 +34,69 @@ namespace Remootio
         [JsonProperty]
         public string APIAuthKey { set; get; } = "EAF97466F0DB4B7BA11AEC9DFFAFBA0D6670FF13FD89377527F104FB5AB62414";  // TEMP
 
+        /// <summary>
+        /// Always 8080
+        /// </summary>
+        [JsonProperty]
+        public int Port { set; get; } = 8080;
+
+
+        [JsonProperty]
+        public string IP
+        {
+            //get => Uri?.ToString();
+            get => _IP;
+
+            set
+            {
+                _IP = value;
+                if (_IP != null)
+                    _IP = _IP.Replace("https", "").Replace("http", "").Replace("://", "").Trim();
+
+                _uri = null;
+            }
+        }
+
+        string _IP;
+
+        [JsonIgnore]
+        const string testurl = "192.168.1.5";  // TEMP
+
+        [JsonIgnore]
+        public Uri Uri
+        {
+            get
+            {
+                if (_uri == null)
+                {
+                    UriBuilder uriBuilder = new UriBuilder()
+                    {
+                        Host = IP,
+                        Port = Port,
+                        Scheme = "ws",
+                    };
+
+                    _uri = uriBuilder.Uri;
+                }
+
+                return _uri;
+            }
+        }
+
+        Uri _uri;
+
+        [JsonIgnore]
+        public string url => $"{Uri}";
+
 
         /// <summary>
         /// To keep connection alive need to send PING every 60-90 sec
         /// </summary>
+        [JsonIgnore]
         Timer pingTimer;
 
         [JsonIgnore]
         int pingMsec => PingSec* 1000;
-
-        [JsonIgnore]
-        const string testurl = "ws://192.168.1.5:8080";  // TEMP
 
         [JsonIgnore]
         WebSocket websocket;
@@ -90,7 +134,15 @@ namespace Remootio
         /// Serialize config
         /// </summary>
         [JsonIgnore]
-        string ConfigJson => JsonConvert.SerializeObject(this);
+        string ConfigJson => IPAddressExtensions.SerializeObject(this);
+
+        /// <summary>
+        /// For checking connection status
+        /// Not used yet
+        /// </summary>
+        [JsonIgnore]
+        DateTime? PingSent = null;
+        DateTime? ReplyReceived = null;
 
 
         #endregion Properties
@@ -105,12 +157,15 @@ namespace Remootio
         /// <param name="url"></param>
         /// <param name="pingSec"></param>
         /// <param name="start"></param>
-        public Remootio(string url = testurl, int pingSec = 5, bool start = true)
+        public Remootio(string IP = testurl, int pingSec = 5, bool start = true)
         {
-            this.url = url;
+            this.IP = IP;
             this.PingSec = pingSec;
             if (start)
                 Start();
+
+            string json = ConfigJson;
+            Remootio test = Remootio.FromJson(json);
         }
 
 
@@ -129,7 +184,7 @@ namespace Remootio
         {
             try
             {
-                return JsonConvert.DeserializeObject<Remootio>(json);
+                return IPAddressExtensions.DeserializeObject<Remootio>(json);
             }
             catch (Exception ex)
             {
@@ -140,18 +195,24 @@ namespace Remootio
 
 
         /// <summary>
-        /// To keep connection alive need to send PING every 60-90 sec
+        /// 
         /// </summary>
-        /// <param name="o"></param>
-        void TimerCallback(object o)
+        /// <param name="IP"></param>
+        /// <param name="port"></param>
+        /// <param name="APISecretKey"></param>
+        /// <param name="APIAuthKey"></param>
+        public void SetIpPort(string IP, short port, string APISecretKey = null, string APIAuthKey = null)
         {
-            SendPing();
+            this.IP = IP;
+            this.Port = port;
+
+            if (APISecretKey != null)
+                this.APISecretKey = APISecretKey;
+
+            if (APIAuthKey != null)
+                this.APIAuthKey = APIAuthKey;
         }
 
-        void StartPingTimer()
-        {
-            pingTimer = new Timer(TimerCallback, this, pingMsec, pingMsec);
-        }
 
         /// <summary>
         /// Open WebSecket connection
@@ -198,6 +259,9 @@ namespace Remootio
             authenticated = false;
             //APISessionKey = null;
             aes = null;
+
+            PingSent = null;
+            ReplyReceived = null;
         }
 
 
@@ -290,6 +354,8 @@ namespace Remootio
         /// <param name="json"></param>
         private void ProcessMessage(type type, string json)
         {
+            ReplyReceived = DateTime.Now;
+
             switch (type)
             {
                 case type.PONG:
@@ -358,6 +424,23 @@ namespace Remootio
 
             // Reccomended after AUTH send QUERY
             SendQuery();
+        }
+
+
+
+        /// <summary>
+        /// To keep connection alive need to send PING every 60-90 sec
+        /// </summary>
+        /// <param name="o"></param>
+        void TimerCallback(object o)
+        {
+            SendPing();
+            PingSent = DateTime.Now;
+        }
+
+        void StartPingTimer()
+        {
+            pingTimer = new Timer(TimerCallback, this, pingMsec, pingMsec);
         }
 
 

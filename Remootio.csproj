@@ -85,6 +85,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="AesEncryption.cs" />
+    <Compile Include="IPAddressConverter.cs" />
     <Compile Include="JSONclasses.cs" />
     <Compile Include="Remootio.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
