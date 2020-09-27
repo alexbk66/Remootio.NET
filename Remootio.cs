@@ -5,7 +5,10 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Threading;
 using System.Net.Sockets;
+using System.Reflection.Emit;
+using System.Text.RegularExpressions;
 using System.IO.Ports;
+
 
 using SuperSocket.ClientEngine;
 using WebSocket4Net;
@@ -13,13 +16,13 @@ using WebSocket4Net;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Converters;
 using Encrypt;
-using System.Reflection.Emit;
+
 
 namespace Remootio
 {
     public partial class Remootio
     {
-        #region Properties
+        #region Saved (Config) Properties
 
         /// <summary>
         /// To keep connection alive need to send PING every 60-90 sec
@@ -27,12 +30,40 @@ namespace Remootio
         [JsonProperty]
         public int PingSec { set; get; } = 60;
 
+        /// <summary>
+        /// Device Name given in the App
+        /// Not yet available
+        /// </summary>
+        [JsonProperty]
+        public string Name { set; get; }
 
         [JsonProperty]
-        public string APISecretKey { set; get; } = "B48C7A34CC64F9E421A64985328619AB6CF1878ECD1649F5E8322F1FE28C93C8";  // TEMP
+        public string APISecretKey
+        { 
+            get => _APISecretKey;
+            set
+            {
+                VerifyKey(ref value, "APISecretKey");
+                _APISecretKey = value;
+            }
+        }
+
+        string _APISecretKey = "B48C7A34CC64F9E421A64985328619AB6CF1878ECD1649F5E8322F1FE28C93C8";  // TEMP
+
 
         [JsonProperty]
-        public string APIAuthKey { set; get; } = "EAF97466F0DB4B7BA11AEC9DFFAFBA0D6670FF13FD89377527F104FB5AB62414";  // TEMP
+        public string APIAuthKey
+        { 
+            get => _APIAuthKey;
+            set
+            {
+                VerifyKey(ref value, "APIAuthKey");
+                _APIAuthKey = value;
+            }
+        }
+
+        string _APIAuthKey = "EAF97466F0DB4B7BA11AEC9DFFAFBA0D6670FF13FD89377527F104FB5AB62414";  // TEMP
+
 
         /// <summary>
         /// Always 8080
@@ -58,6 +89,13 @@ namespace Remootio
         }
 
         string _IP;
+
+
+        #endregion Saved Properties
+
+
+        #region Properties
+
 
         [JsonIgnore]
         const string testurl = "192.168.1.5";  // TEMP
@@ -87,6 +125,9 @@ namespace Remootio
 
         [JsonIgnore]
         public string url => $"{Uri}";
+
+        [JsonIgnore]
+        public bool BadIP => Uri == null || Uri.IsLoopback;
 
 
         /// <summary>
@@ -134,7 +175,7 @@ namespace Remootio
         /// Serialize config
         /// </summary>
         [JsonIgnore]
-        string ConfigJson => IPAddressExtensions.SerializeObject(this);
+        public string ConfigJson => IPAddressExtensions.SerializeObject(this);
 
         /// <summary>
         /// For checking connection status
@@ -175,6 +216,28 @@ namespace Remootio
         }
 
 
+        public override string ToString()
+        {
+            return $"{Name} {url}";
+        }
+
+
+        /// <summary>
+        /// ApiSecretKey must be a hexstring representing a 256bit long byteArray
+        /// </summary>
+        /// <param name="value"></param>
+        /// <param name="name"></param>
+        static void VerifyKey(ref string value, string name)
+        {
+            if (String.IsNullOrEmpty(value))
+                throw new ArgumentNullException(name);
+
+            value = value.Trim();
+            if (!Regex.IsMatch(value, @"[0-9A-Fa-f]{64}"))
+                throw new ArgumentException("Invalid key", name);
+        }
+
+
         /// <summary>
         /// Create Remootio fro json config string
         /// </summary>
@@ -184,13 +247,14 @@ namespace Remootio
         {
             try
             {
-                return IPAddressExtensions.DeserializeObject<Remootio>(json);
+                if(!String.IsNullOrEmpty(json))
+                    return IPAddressExtensions.DeserializeObject<Remootio>(json);
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"FromJson({json}): {ex}");
-                return null;
             }
+            return null;
         }
 
 
