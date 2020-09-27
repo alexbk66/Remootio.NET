@@ -13,7 +13,7 @@ using WebSocket4Net;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Converters;
 using Encrypt;
-
+using System.Reflection.Emit;
 
 namespace Remootio
 {
@@ -21,36 +21,76 @@ namespace Remootio
     {
         #region Properties
 
-        string url;
-        const string testurl = "ws://192.168.1.5:8080";  // TEMP
-        WebSocket websocket;
+        [JsonProperty]
+        public string url { set; get; }
+
+        /// <summary>
+        /// To keep connection alive need to send PING every 60-90 sec
+        /// </summary>
+        [JsonProperty]
+        public int PingSec { set; get; } = 60;
+
+        /// <summary>
+        /// Always 8080
+        /// </summary>
+        [JsonProperty]
+        public int Port { set; get; } = 8080;
+
+        [JsonProperty]
+        public string APISecretKey { set; get; } = "B48C7A34CC64F9E421A64985328619AB6CF1878ECD1649F5E8322F1FE28C93C8";  // TEMP
+
+        [JsonProperty]
+        public string APIAuthKey { set; get; } = "EAF97466F0DB4B7BA11AEC9DFFAFBA0D6670FF13FD89377527F104FB5AB62414";  // TEMP
+
+
+        /// <summary>
+        /// To keep connection alive need to send PING every 60-90 sec
+        /// </summary>
         Timer pingTimer;
-        int pingMsec;
 
+        [JsonIgnore]
+        int pingMsec => PingSec* 1000;
+
+        [JsonIgnore]
+        const string testurl = "ws://192.168.1.5:8080";  // TEMP
+
+        [JsonIgnore]
+        WebSocket websocket;
+
+        [JsonIgnore]
         AesEncryption aes;
-        bool authenticated = false;
 
-        string APISecretKey = "B48C7A34CC64F9E421A64985328619AB6CF1878ECD1649F5E8322F1FE28C93C8";  // TEMP
-        string APIAuthKey = "EAF97466F0DB4B7BA11AEC9DFFAFBA0D6670FF13FD89377527F104FB5AB62414";  // TEMP
+        [JsonIgnore]
+        bool authenticated = false;
 
         /// <summary>
         /// Should be null normally - then IV will be generated in EncryptStringToBytes
         /// </summary>
+        [JsonIgnore]
         string sIV = "9FbUN/uLWXpQTLpnI56P7A==";  // TEMP
 
 
         /// <summary>
         /// Each command the API client sends to Remootio must contain an acionId
         /// that is the last action id(denoted as lastActionId)
-        /// incremented by one(and truncated to 31bits)"
+        /// incremented by one (and truncated to 31bits)
         /// </summary>
+        [JsonIgnore]
         int LastActionId { get; set; }
 
 
         /// <summary>
-        /// incremented LastActionId by one(and truncated to 31bits)"
+        /// incremented LastActionId by one (and truncated to 31bits)
         /// </summary>
+        [JsonIgnore]
         int NextActionId => (LastActionId + 1) % 0x7FFFFFFF;
+
+
+        /// <summary>
+        /// Serialize config
+        /// </summary>
+        [JsonIgnore]
+        string ConfigJson => JsonConvert.SerializeObject(this);
 
 
         #endregion Properties
@@ -60,7 +100,7 @@ namespace Remootio
 
 
         /// <summary>
-        /// 
+        /// Ctor
         /// </summary>
         /// <param name="url"></param>
         /// <param name="pingSec"></param>
@@ -68,14 +108,39 @@ namespace Remootio
         public Remootio(string url = testurl, int pingSec = 5, bool start = true)
         {
             this.url = url;
-            pingMsec = pingSec * 1000;
+            this.PingSec = pingSec;
             if (start)
                 Start();
         }
 
 
+        [JsonConstructor]
+        private Remootio()
+        {
+        }
+
+
         /// <summary>
-        /// 
+        /// Create Remootio fro json config string
+        /// </summary>
+        /// <param name="json"></param>
+        /// <returns></returns>
+        public static Remootio FromJson(string json)
+        {
+            try
+            {
+                return JsonConvert.DeserializeObject<Remootio>(json);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"FromJson({json}): {ex}");
+                return null;
+            }
+        }
+
+
+        /// <summary>
+        /// To keep connection alive need to send PING every 60-90 sec
         /// </summary>
         /// <param name="o"></param>
         void TimerCallback(object o)
@@ -83,9 +148,13 @@ namespace Remootio
             SendPing();
         }
 
+        void StartPingTimer()
+        {
+            pingTimer = new Timer(TimerCallback, this, pingMsec, pingMsec);
+        }
 
         /// <summary>
-        /// 
+        /// Open WebSecket connection
         /// </summary>
         void Start()
         {
@@ -151,7 +220,8 @@ namespace Remootio
         /// <param name="e"></param>
         private void websocket_Opened(object sender, EventArgs e)
         {
-            pingTimer = new Timer(TimerCallback, this, pingMsec, pingMsec);
+            // To keep connection alive need to send PING every 60-90 sec
+            StartPingTimer();
 
             if (!authenticated)
                 SendAuth();
@@ -200,23 +270,24 @@ namespace Remootio
         {
             Console.WriteLine($"Received {e.Message}");
 
-            // Get type first
-            BASE msg;
-
             try
             {
-                msg = JsonConvert.DeserializeObject<BASE>(e.Message);
+                // Get type first
+                BASE msg = JsonConvert.DeserializeObject<BASE>(e.Message);
+                ProcessMessage(msg.type, e.Message);
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"ERROR: Couldn't deserialize '{e.Message}': {ex}");
-                return;
             }
-
-            ProcessMessage(msg.type, e.Message);
         }
 
 
+        /// <summary>
+        /// Process Wbsocket Message
+        /// </summary>
+        /// <param name="type"></param>
+        /// <param name="json"></param>
         private void ProcessMessage(type type, string json)
         {
             switch (type)
@@ -257,6 +328,18 @@ namespace Remootio
             // Probably call websocket_MessageReceived with decrypted message
             string payload = aes.DecryptStringFromBytes(enc.data.payload, enc.data.iv);
             var obj = JsonConvert.DeserializeObject(payload);
+
+
+            HandleChallenge(payload);
+        }
+
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="enc"></param>
+        void HandleChallenge(string payload)
+        {
             Challenge challenge = JsonConvert.DeserializeObject<Challenge>(payload);
             //Challenge challenge = aes.DecryptStringFromBytes<Challenge>(enc.data.payload, enc.data.iv);
 
