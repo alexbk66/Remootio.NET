@@ -10,8 +10,9 @@ using System.Text.RegularExpressions;
 using System.IO.Ports;
 
 
-using SuperSocket.ClientEngine;
-using WebSocket4Net;
+//using SuperSocket.ClientEngine;
+//using WebSocket4Net;
+using WebSocketSharp;
 
 using Newtonsoft.Json;
 using Newtonsoft.Json.Converters;
@@ -205,8 +206,8 @@ namespace Remootio
             if (start)
                 Start();
 
-            string json = ConfigJson;
-            Remootio test = Remootio.FromJson(json);
+            //string json = ConfigJson;
+            //Remootio test = Remootio.FromJson(json);
         }
 
 
@@ -289,13 +290,14 @@ namespace Remootio
             aes = new AesEncryption(APISecretKey: APISecretKey);
 
             websocket = new WebSocket(url);
-            websocket.Opened += new EventHandler(websocket_Opened);
-            websocket.Error += new EventHandler<ErrorEventArgs>(websocket_Error);
-            websocket.Closed += new EventHandler(websocket_Closed);
-            websocket.MessageReceived += new EventHandler<MessageReceivedEventArgs>(websocket_MessageReceived);
+            websocket.OnOpen += new EventHandler(websocket_Opened);
+            websocket.OnMessage += new EventHandler<MessageEventArgs>(websocket_MessageReceived);
+            websocket.OnError += new EventHandler<ErrorEventArgs>(websocket_Error);
+            websocket.OnClose += new EventHandler<CloseEventArgs>(websocket_Closed);
+
             try
             {
-                websocket.Open();
+                websocket.Connect();
             }
             catch (SocketException ex)
             {
@@ -316,8 +318,13 @@ namespace Remootio
             if (pingTimer != null)
                 pingTimer.Dispose();
             pingTimer = null;
-            if (websocket != null)
-                websocket.Dispose();
+
+            try
+            {
+                if (websocket != null && websocket.IsAlive)
+                    websocket.Close();
+            }
+            catch (Exception ex) { }
             websocket = null;
 
             authenticated = false;
@@ -361,16 +368,9 @@ namespace Remootio
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
-        private void websocket_Closed(object sender, EventArgs e)
+        private void websocket_Closed(object sender, CloseEventArgs e)
         {
-            if (e is ClosedEventArgs)
-            {
-                Console.WriteLine($"Closed: {(e as ClosedEventArgs).Code} : {(e as ClosedEventArgs).Reason}");
-            }
-            else
-            {
-                Console.WriteLine($"Closed: {e}");
-            }
+            Console.WriteLine($"Closed code: {e.Code}, reason '{e.Reason}'");
 
             Restart();
         }
@@ -394,19 +394,27 @@ namespace Remootio
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
-        private void websocket_MessageReceived(object sender, MessageReceivedEventArgs e)
+        private void websocket_MessageReceived(object sender, MessageEventArgs e)
         {
-            Console.WriteLine($"Received {e.Message}");
+            if (!e.IsText)
+            {
+                // use e.RawData
+                Console.WriteLine($"Received binary data");
+                return;
+            }
 
+            string json = e.Data;
             try
             {
+                Console.WriteLine($"Received {json}");
+
                 // Get type first
-                BASE msg = JsonConvert.DeserializeObject<BASE>(e.Message);
-                ProcessMessage(msg.type, e.Message);
+                BASE msg = JsonConvert.DeserializeObject<BASE>(json);
+                ProcessMessage(msg.type, json);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"ERROR: Couldn't deserialize '{e.Message}': {ex}");
+                Console.WriteLine($"ERROR: Couldn't deserialize '{json}': {ex}");
             }
         }
 
@@ -561,8 +569,14 @@ namespace Remootio
             {
                 string json = JsonConvert.SerializeObject(msg);
                 Console.WriteLine($"Send: {json}");
+
                 lock (websocket_lock)
                 {
+                    if (websocket == null)
+                    {
+                        Console.WriteLine($"Sending {msg} - but websocket is closed, trying to open");
+                        Start();
+                    }
                     websocket.Send(json);
                     return;
                 }
