@@ -180,17 +180,19 @@ namespace Encrypt
         /// <summary>
         /// 
         /// </summary>
-        /// <param name="plainText"></param>
+        /// <param name="payload"></param>
         /// <param name="sKey"></param>
         /// <param name="sIV">optional, mostly for testing</param>
         /// <returns></returns>
-        public string EncryptStringToBytes(string plainText, string sKey = null, string sIV = null)
+        public string EncryptStringToBytes(string payload, string sKey = null, string sIV = null)
         {
             if(!String.IsNullOrEmpty(sKey))
                 Key = StringToByteArray(sKey);
 
             byte[] iv = (!String.IsNullOrEmpty(sIV))? Convert.FromBase64String(sIV) : null;
-            byte[] encrypted = EncryptStringToBytes(plainText, Key, iv);
+            byte[] encrypted = EncryptStringToBytes(payload, Key, iv);
+
+            Console.WriteLine($"Unencrypted payload({payload.Length} bytes): {payload}, IV: '{this.sIV}'");
 
             return Convert.ToBase64String(encrypted);
         }
@@ -283,10 +285,10 @@ namespace Encrypt
                     {
                         using (StreamReader srDecrypt = new StreamReader(csDecrypt))
                         {
-
                             // Read the decrypted bytes from the decrypting stream
-                            // and place them in a string.
-                            return srDecrypt.ReadToEnd();
+                            string payload = srDecrypt.ReadToEnd();
+                            Console.WriteLine($"Decrypted payload({payload.Length} bytes): {payload}, IV: '{IV}'");
+                            return payload;
                         }
                     }
                 }

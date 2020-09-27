@@ -17,7 +17,7 @@ using Encrypt;
 
 namespace Remootio
 {
-    public class Remootio
+    public partial class Remootio
     {
         #region Properties
 
@@ -44,17 +44,14 @@ namespace Remootio
         /// that is the last action id(denoted as lastActionId)
         /// incremented by one(and truncated to 31bits)"
         /// </summary>
-        int ActionId { get; set; }
+        int LastActionId { get; set; }
 
 
         /// <summary>
-        /// TEMP - TODO - when recived reply for the IncrActionId - then increment
+        /// incremented LastActionId by one(and truncated to 31bits)"
         /// </summary>
-        void IncrActionId()
-        {
-            // incremented by one(and truncated to 31bits)"
-            ActionId = (ActionId + 1) % 0x7FFFFFFF;
-        }
+        int NextActionId => (LastActionId + 1) % 0x7FFFFFFF;
+
 
         #endregion Properties
 
@@ -216,51 +213,65 @@ namespace Remootio
                 return;
             }
 
-            switch (msg.type)
+            ProcessMessage(msg.type, e.Message);
+        }
+
+
+        private void ProcessMessage(type type, string json)
+        {
+            switch (type)
             {
                 case type.PONG:
                     return;
 
                 case type.ERROR:
                 case type.INPUT_ERROR:
-                    var err = JsonConvert.DeserializeObject<ERROR>(e.Message);
+                    var err = JsonConvert.DeserializeObject<ERROR>(json);
                     Console.WriteLine($"ERROR: {err.errorMessage}");
                     break;
 
                 case type.SERVER_HELLO:
-                    var hello = JsonConvert.DeserializeObject<SERVER_HELLO>(e.Message);
+                    var hello = JsonConvert.DeserializeObject<SERVER_HELLO>(json);
                     Console.WriteLine($"HELLO: api: {hello.apiVersion}, {hello.message}");
                     break;
 
                 case type.ENCRYPTED:
-                    var enc = JsonConvert.DeserializeObject<ENCRYPTED>(e.Message);
-                    HandleChallenge(enc);
+                    var enc = JsonConvert.DeserializeObject<ENCRYPTED>(json);
+                    HandleEncrypted(enc);
                     break;
 
                 default:
-                    Console.WriteLine($"unknown msg type {msg.type}");
+                    Console.WriteLine($"unknown msg type {type}: {json}");
                     break;
             }
         }
 
 
-        void HandleChallenge(ENCRYPTED enc)
+        /// <summary>
+        /// Decrypt and process Encrypted message
+        /// </summary>
+        /// <param name="enc"></param>
+        void HandleEncrypted(ENCRYPTED enc)
         {
-            //Console.WriteLine($"ENCRYPTED: {msg2.data.iv}");
-            Challenge challenge = aes.DecryptStringFromBytes<Challenge>(enc.data.payload, enc.data.iv);
+            // TEMP - TODO: get type and process!
+            // Probably call websocket_MessageReceived with decrypted message
+            string payload = aes.DecryptStringFromBytes(enc.data.payload, enc.data.iv);
+            var obj = JsonConvert.DeserializeObject(payload);
+            Challenge challenge = JsonConvert.DeserializeObject<Challenge>(payload);
+            //Challenge challenge = aes.DecryptStringFromBytes<Challenge>(enc.data.payload, enc.data.iv);
+
             if (challenge?.challenge != null)
             {
-                ActionId = challenge.challenge.initialActionId;
+                LastActionId = challenge.challenge.initialActionId;
                 string APISessionKey = challenge.challenge.sessionKey;
                 // After authentication use new APISessionKey for encryption
                 // APIAuthKey is used for HMAC calculation
                 aes = new AesEncryption(base64Key: APISessionKey, APIAuthKey: APIAuthKey);
 
-                IncrActionId(); // Looks like need to increment?
-                Console.WriteLine($"initialActionId: {ActionId}");
+                Console.WriteLine($"initialActionId: {LastActionId}");
             }
 
-            SendHello();
+            //SendHello();
 
             // Reccomended after AUTH send QUERY
             SendQuery();
@@ -268,6 +279,46 @@ namespace Remootio
 
 
         #endregion Construction
+
+
+        #region Public Methods
+
+
+        /// <summary>
+        /// 
+        /// </summary>
+        public void SendPing()
+        {
+            Send(new PING());
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        public void SendAuth()
+        {
+            Send(new AUTH());
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        public void SendHello()
+        {
+            Send(new HELLO());
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        public void SendQuery()
+        {
+            Send(new QUERY(NextActionId, aes, sIV));
+        }
+
+
+
+        #endregion Public Methods
 
 
         #region Send
@@ -297,40 +348,6 @@ namespace Remootio
 
             Restart();
         }
-
-
-        /// <summary>
-        /// 
-        /// </summary>
-        private void SendPing()
-        {
-            Send(new PING());
-        }
-
-        /// <summary>
-        /// 
-        /// </summary>
-        private void SendAuth()
-        {
-            Send(new AUTH());
-        }
-
-        /// <summary>
-        /// 
-        /// </summary>
-        private void SendHello()
-        {
-            Send(new HELLO());
-        }
-
-        /// <summary>
-        /// 
-        /// </summary>
-        private void SendQuery()
-        {
-            Send(new QUERY(ActionId, aes, sIV));
-        }
-
 
 
         /// <summary>
@@ -376,317 +393,5 @@ namespace Remootio
 
 
         #endregion Send
-
-
-        #region JSON classes
-
-        /// <summary>
-        /// Message types
-        /// </summary>
-        public enum type
-        {
-            NOTSET,
-
-            // The API client sends this to keep the connection alive. It is recommended to send one PING frame to the
-            // Remootio device every 60-90 seconds and also check for the PONG response to detect a broken connection.
-            // Direction: API client → Remootio device
-            PING,
-
-            // Response: Remootio device → API client
-            PONG,
-
-            // The Remootio device sends error frames to the API client to indicate various errors
-            // Direction: Remootio device → API client
-            ERROR,
-
-            // Note: not documented
-            INPUT_ERROR,
-
-            // The API client can send this frame to check the version of the Websocket API running on the Remootio device
-            // Direction: API client → Remootio device
-            HELLO,
-
-            // Response: Remootio device → API client
-            SERVER_HELLO,
-
-            // The API client sends the AUTH frame to start the authentication flow
-            // Direction: API client → Remootio device
-            AUTH,
-
-            //
-            ENCRYPTED,
-
-            // The API client sends this action to get the current state of the gate or garage door (open/closed)
-            // Direction: API client → Remootio device
-            QUERY,
-
-            // The API client sends this action to trigger the control output of the Remootio device
-            // and thus operate the gate or garage door
-            // Direction: API client → Remootio device
-            TRIGGER,
-
-            // The API client sends this action to open the gate or the garage door. 
-            // This will trigger Remootio's control output only if the gate or garage door status is "closed"
-            // Direction: API client → Remootio device
-            OPEN,
-
-            // The API client sends this action to close the gate or the garage door. 
-            // This will trigger Remootio's control output only if the gate or garage door status is "open"
-            // Direction: API client → Remootio device
-            CLOSE,
-
-            // The API client sends this action to restart the Remootio device. The UNENCRYPTED_PAYLOAD of the
-            // action is shown below (the action id also needs to be calculated id = lastActionId % 0x7FFFFFFF) 
-            // Direction: API client → Remootio device
-            RESTART,
-
-            // Remootio sends the following event if the status of the gate or garage door has changed
-            // (from "open" to "closed" or from "closed" to "open"). 
-            // This is the only event that is sent if the API is enabled without logging.
-            // It is also sent if the API is enabled with logging. 
-            // Direction: Remootio device → API client
-            StateChange,
-
-            // Remootio sends the following event if it any key has operated the Remootio device
-            // (triggered the control output)
-            // Direction: Remootio device → API client
-            RelayTrigger,
-
-            // Remootio sends the following event if any key has connected to the Remootio device.
-            // Direction: Remootio device → API client
-            Connected,
-
-            // Remootio sends the following event if the gate or garage door has been left open for some time
-            // Direction: Remootio device → API client
-            LeftOpen,
-
-            // Remootio sends the following event if the access rights or notification settings for any key have been changed
-            // Direction: Remootio device → API client
-            KeyManagement,
-
-            // Remootio sends the following event if it was restarted
-            // This is only sent if the API is enabled with logging
-            // Direction: Remootio device → API client
-            Restart,
-
-            // Remootio sends the following event if the manual button was pushed
-            // This is only sent if the API is enabled with logging
-            // Direction: Remootio device → API client
-            ManualButtonPushed,
-
-            // Remootio sends the following event if the manual button was enabled
-            // This is only sent if the API is enabled with logging
-            // Direction: Remootio device → API client
-            ManualButtonEnabled,
-
-            // Remootio sends the following event if the manual button was disabled. 
-            // This is only sent if the API is enabled with logging
-            // Direction: Remootio device → API client
-            ManualButtonDisabled,
-
-            // Remootio sends the following event if the doorbell was pushed. 
-            // This is only sent if the API is enabled with logging
-            // Direction: Remootio device → API client
-            DoorbellPushed,
-
-            // Remootio sends the following event if the doorbell was enabled
-            // This is only sent if the API is enabled with logging
-            // Direction: Remootio device → API client
-            DoorbellEnabled,
-
-            // Remootio sends the following event if the doorbell was disabled
-            // This is only sent if the API is enabled with logging
-            // Direction: Remootio device → API client
-            DoorbellDisabled,
-
-            // Remootio sends the following event if the status sensor was enabled. 
-            // This is only sent if the API is enabled with logging
-            // Direction: Remootio device → API client
-            SensorEnabled,
-
-            // Remootio sends the following event if the logic of the status sensor was flipped
-            // This is only sent if the API is enabled with logging
-            // Direction: Remootio device → API client
-            SensorFlipped,
-
-            // Remootio sends the following event if the status sensor was disabled
-            // This is only sent if the API is enabled with logging
-            // Direction: Remootio device → API client
-            SensorDisabled,
-
-        }
-
-
-        public class _Challenge
-        {
-            public string sessionKey { get; set; }
-            public int initialActionId { get; set; }
-        }
-
-
-        /// <summary>
-        /// Received from device in response to "AUTH"
-        /// </summary>
-        public class Challenge
-        {
-            public _Challenge challenge { get; set; }
-        }
-
-
-        [Serializable]
-        public class BASE
-        {
-            [JsonConverter(typeof(StringEnumConverter))]
-            public type type;
-
-            [JsonConstructor]
-            BASE()
-            {
-            }
-
-            protected BASE(type type)
-            {
-                this.type = type;
-            }
-        }
-
-
-        protected class PING : BASE
-        {
-            public PING() : base(type.PING) { }
-        }
-
-
-        protected class AUTH : BASE
-        {
-            public AUTH() : base(type.AUTH) { }
-        }
-
-
-        protected class HELLO : BASE
-        {
-            public HELLO() : base(type.HELLO) { }
-        }
-
-
-        public class ENCRYPTED : BASE
-        {
-            [JsonConstructor]
-            public ENCRYPTED() : base(type.ENCRYPTED) { }
-
-            public encr data;
-        }
-
-        public class encr
-        {
-            public string iv;
-            public string payload;
-            public string mac;
-        }
-
-
-
-        protected class ERROR : BASE
-        {
-            [JsonConstructor]
-            public ERROR() : base(type.ERROR) { }
-
-            public string errorMessage;
-        }
-
-        protected class SERVER_HELLO : BASE
-        {
-            [JsonConstructor]
-            public SERVER_HELLO() : base(type.SERVER_HELLO) { }
-
-            public int apiVersion;
-            public string message;
-        }
-
-
-        #region ACTIONS
-
-
-        protected class QUERY : E_ACTION
-        {
-            /// <summary>
-            /// 
-            /// </summary>
-            /// <param name="id">ActionID</param>
-            /// <param name="aes">AesEncryption</param>
-            /// <param name="sIV">Only for testing, normally pass null to generate</param>
-            [JsonConstructor]
-            public QUERY(int id, AesEncryption aes, string sIV = null)
-                : base(type.QUERY, id, aes, sIV)
-            {
-            }
-        }
-
-
-        /// <summary>
-        /// ACTION.action field definition
-        /// If derive from BASE - then the order in json string changes
-        /// from "type, id" to "id, type" - which affects encryption?
-        /// {"action":{"type":"QUERY","id":1836946866}}
-        /// </summary>
-        public class _ACTION// : BASE
-        {
-            [JsonConstructor]
-            public _ACTION(type type, int id)
-            //: base(type)
-            {
-                this.type = type;
-                this.id = id;
-            }
-
-            [JsonConverter(typeof(StringEnumConverter))]
-            public type type;
-
-            // Action ID
-            public int id;
-        }
-
-
-        /// <summary>
-        /// Unencrypted data.payload of the frame
-        /// {"action":{"type":"QUERY","id":1836946866}}
-        /// </summary>
-        public class ACTION
-        {
-            [JsonConstructor]
-            public ACTION(type type, int id)
-            {
-                Console.WriteLine($"\nACTION: '{type}', id {id}");
-                action = new _ACTION(type, id);
-            }
-
-            public _ACTION action;
-        }
-
-
-        /// <summary>
-        /// Encrypted wrapper for Action
-        /// </summary>
-        public class E_ACTION : ENCRYPTED
-        {
-            /// <summary>
-            /// Ctor - create encr data field
-            /// </summary>
-            /// <param name="type"></param>
-            /// <param name="id">Action ID</param>
-            /// <param name="aes">AesEncryption</param>
-            /// <param name="sIV">Only for testing, normally pass null to generate</param>
-            public E_ACTION(type type, int id, AesEncryption aes, string sIV = null)
-            {
-                ACTION action = new ACTION(type, id);
-
-                data = MakeEncr(action, aes, sIV);
-            }
-        }
-
-
-        #endregion ACTIONS
-
-        #endregion JSON classes
     }
 }
