@@ -169,8 +169,12 @@ namespace Remootio
         /// incremented LastActionId by one (and truncated to 31bits)
         /// </summary>
         [JsonIgnore]
-        int NextActionId => (LastActionId + 1) % 0x7FFFFFFF;
+        int NextActionId => (LastActionId + 1) % mask;
 
+        /// <summary>
+        /// truncated to 31bits
+        /// </summary>
+        const int mask = 0x7FFFFFFF;
 
         /// <summary>
         /// Serialize config
@@ -199,6 +203,12 @@ namespace Remootio
         [JsonIgnore]
         public string ErrorCode { get; protected set; }
 
+
+        /// <summary>
+        /// WebSocket API version received from SERVER_HELLO
+        /// </summary>
+        [JsonIgnore]
+        public int apiVersion { get; protected set; } = 0;
 
         #endregion Properties
 
@@ -475,7 +485,10 @@ namespace Remootio
                 // 
                 case type.SERVER_HELLO:
                     var hello = JsonConvert.DeserializeObject<SERVER_HELLO>(json);
-                    Console.WriteLine($"HELLO: api: {hello.apiVersion}, {hello.message}");
+
+                    apiVersion = hello.apiVersion;
+
+                    Console.WriteLine($"HELLO: api: {apiVersion}, {hello.message}");
                     break;
 
                 // Response to QUERY
@@ -534,7 +547,6 @@ namespace Remootio
         void HandleChallenge(string payload)
         {
             Challenge challenge = JsonConvert.DeserializeObject<Challenge>(payload);
-            //Challenge challenge = aes.DecryptStringFromBytes<Challenge>(enc.data.payload, enc.data.iv);
 
             if (challenge?.challenge != null)
             {
@@ -547,8 +559,6 @@ namespace Remootio
                 Console.WriteLine($"initialActionId: {LastActionId}");
             }
 
-            //SendHello();
-
             // Reccomended after AUTH send QUERY
             SendQuery();
         }
@@ -557,15 +567,26 @@ namespace Remootio
         /// <summary>
         /// TEMP - Not sure  pass BASE?
         /// </summary>
-        /// <param name="resp"></param>
-        void HandleResponse(QUERY_RESPONSE resp)
+        /// <param name="response">QUERY_RESPONSE</param>
+        void HandleResponse(QUERY_RESPONSE response)
         {
-            if (resp == null)
+            if (response == null)
                 return;
 
-            State = resp.state;
-            if(!resp.success)
-                ErrorCode = resp.errorCode;
+            State = response.state;
+            if (!response.success)
+                ErrorCode = response.errorCode;
+
+            if (LastActionId <= response.id || (response.id == 0 && LastActionId == mask))
+            {
+                // We increment the action id (we actually just set it to be equal to the previous message's ID we've sent)
+                LastActionId = response.id;
+                Console.WriteLine($"Received response to last action, set LastActionId to {LastActionId}");
+
+                // First time received reply to QUERY - send also HELLO
+                if(apiVersion <=0 )
+                    SendHello();
+            }
         }
 
 
@@ -578,6 +599,7 @@ namespace Remootio
             SendPing();
             PingSent = DateTime.Now;
         }
+
 
         void StartPingTimer()
         {
@@ -592,31 +614,35 @@ namespace Remootio
 
 
         /// <summary>
-        /// 
+        /// To keep connection alive need to send PING every 60-90 sec
         /// </summary>
         public void SendPing()
         {
             Send(new PING());
         }
 
+
         /// <summary>
-        /// 
+        /// The API client sends the AUTH frame to start the authentication flow
         /// </summary>
         public void SendAuth()
         {
             Send(new AUTH());
         }
 
+
         /// <summary>
-        /// 
+        /// The API client can send this frame to check the version of the Websocket API
         /// </summary>
         public void SendHello()
         {
             Send(new HELLO());
         }
 
+
         /// <summary>
-        /// 
+        /// The API client sends this action to get the current
+        /// state of the gate or garage door (open/closed)
         /// </summary>
         public void SendQuery()
         {
@@ -624,6 +650,16 @@ namespace Remootio
             Send(q);
         }
 
+
+        /// <summary>
+        /// The API client sends this action to get the current
+        /// state of the gate or garage door (open/closed)
+        /// </summary>
+        public void SendTrigger()
+        {
+            TRIGGER q = new TRIGGER(NextActionId, aes, sIV);
+            Send(q);
+        }
 
 
         #endregion Public Methods

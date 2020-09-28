@@ -285,6 +285,22 @@ namespace Remootio
         }
 
 
+        protected class TRIGGER : E_ACTION
+        {
+            /// <summary>
+            /// 
+            /// </summary>
+            /// <param name="id">ActionID</param>
+            /// <param name="aes">AesEncryption</param>
+            /// <param name="sIV">Only for testing, normally pass null to generate</param>
+            [JsonConstructor]
+            public TRIGGER(int id, AesEncryption aes, string sIV = null)
+                : base(type.TRIGGER, id, aes, sIV)
+            {
+            }
+        }
+
+
         /// <summary>
         /// ACTION.action field definition
         /// {"action":{"type":"QUERY","id":1836946866}}
