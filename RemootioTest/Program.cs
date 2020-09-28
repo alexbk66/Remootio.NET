@@ -6,9 +6,14 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Diagnostics;
 
+using Newtonsoft.Json;
+using Newtonsoft.Json.Converters;
+
 using Encrypt;
 using Remootio;
 using static Remootio.Remootio;
+
+
 
 namespace RemootioTest
 {
@@ -27,6 +32,7 @@ namespace RemootioTest
                 iv = "vz3r424R6v9XFchkkgWQTw==",
                 expected_payload = "L6eTyvyY/q4I7oDAfdeDyz17x0vMUqmqvnCYl73zG2UxnYpIKVIQ0DooAWxcm3WT",
                 expected_mac = "legB+2ZnikMtX54VpkPVc8P7o17s61y1JqGDvFrxbts=",
+                expected_frame = @"{""type"":""ENCRYPTED"",""data"":{""iv"":""vz3r424R6v9XFchkkgWQTw=="",""payload"":""L6eTyvyY/q4I7oDAfdeDyz17x0vMUqmqvnCYl73zG2UxnYpIKVIQ0DooAWxcm3WT""},""mac"":""legB+2ZnikMtX54VpkPVc8P7o17s61y1JqGDvFrxbts=""}",
             };
 
             // 
@@ -44,7 +50,7 @@ namespace RemootioTest
 
 
             //TestACTION(test1);
-            TestACTION(test2);
+            //TestACTION(test2);
 
             // Now test Remootio client
             var r = new Remootio.Remootio();
@@ -60,25 +66,34 @@ namespace RemootioTest
         {
             AesEncryption aes = new AesEncryption(base64Key: t.APISessionKey, APIAuthKey: t.APIAuthKey);
 
-            Console.WriteLine($"\nTest MakeEncr");
-
-            // Test MakeEncr directly
-            ACTION query = new ACTION(type.QUERY, t.lastActionID + 1);
-
-            encr encr1 = MakeEncr(query, aes/*, t.APIAuthKey*/, t.iv);
-
-            Debug.Assert(encr1.payload == t.expected_payload);
-            Debug.Assert(encr1.mac == t.expected_mac);
+            //Console.WriteLine($"\nTest MakeEncr");
+            //
+            //// Test MakeEncr directly
+            //ACTION query = new ACTION(type.QUERY, t.lastActionID + 1);
+            //
+            //encr encr1 = MakeEncr(query, aes/*, t.APIAuthKey*/, t.iv);
+            //Debug.Assert(encr1.payload == t.expected_payload);
+            //
+            //string mac1 = hmac(encr1, aes);
+            //Debug.Assert(mac1 == t.expected_mac);
 
             Console.WriteLine($"\nTest E_ACTION wrapper");
             // Test E_ACTION wrapper - should produce same "encr"
             E_ACTION e_ACTION = new E_ACTION(type.QUERY, t.lastActionID + 1, aes, t.iv);
 
             encr encr2 = e_ACTION.data;
-
             Debug.Assert(encr2.payload == t.expected_payload);
-            Debug.Assert(encr2.mac == t.expected_mac);
-            Console.WriteLine($"\nDone\n");
+
+            //string mac2 = hmac(encr2, aes);
+            string mac2 = e_ACTION.mac;
+            Debug.Assert(mac2 == t.expected_mac);
+
+            string json = JsonConvert.SerializeObject(e_ACTION);
+
+            Console.WriteLine($"Frame: {json}\n");
+
+            if (t.expected_frame != null)
+                Debug.Assert(t.expected_frame == json);
         }
     }
 
@@ -93,5 +108,6 @@ namespace RemootioTest
 
         public string expected_payload;
         public string expected_mac;
+        public string expected_frame;
     }
 }

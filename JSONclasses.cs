@@ -177,7 +177,7 @@ namespace Remootio
             // By default any property without an Order setting will be given an order of -1. 
             // So you must either give all serialized properties and order, or set your first item to -2
             [JsonConverter(typeof(StringEnumConverter))]
-            [JsonProperty(Order = -2)]
+            [JsonProperty(Order = -10)]
             public type type;
 
             [JsonConstructor]
@@ -215,14 +215,18 @@ namespace Remootio
             [JsonConstructor]
             public ENCRYPTED() : base(type.ENCRYPTED) { }
 
+            [JsonProperty(Order = -9)]
             public encr data;
+            [JsonProperty(Order = -8)]
+            public string mac;
         }
+
 
         public class encr
         {
             public string iv;
             public string payload;
-            public string mac;
+            //public string mac;
         }
 
 
@@ -235,6 +239,20 @@ namespace Remootio
             public string errorMessage;
         }
 
+        protected class QUERY_RESPONSE : BASE
+        {
+            [JsonConstructor]
+            public QUERY_RESPONSE() : base(type.QUERY) { }
+
+            public int id { get; set; }
+            public bool success { get; set; }
+            public string state { get; set; }
+            public int t100ms { get; set; }
+            public bool relayTriggered { get; set; }
+            public string errorCode { get; set; }
+        }
+
+
         protected class SERVER_HELLO : BASE
         {
             [JsonConstructor]
@@ -243,7 +261,7 @@ namespace Remootio
             public int apiVersion;
             public string message;
         }
-
+         
 
         #endregion Messages
 
@@ -277,7 +295,7 @@ namespace Remootio
             public _ACTION(type type, int id)
                 : base(type)
             {
-                this.type = type;
+                //this.type = type;
                 this.id = id;
             }
 
@@ -320,6 +338,7 @@ namespace Remootio
                 ACTION action = new ACTION(type, id);
 
                 this.data = MakeEncr(action, aes, sIV);
+                this.mac = hmac(data, aes);
             }
         }
 

@@ -9,15 +9,12 @@ using System.Reflection.Emit;
 using System.Text.RegularExpressions;
 using System.IO.Ports;
 
-
-//using SuperSocket.ClientEngine;
-//using WebSocket4Net;
 using WebSocketSharp;
 
 using Newtonsoft.Json;
 using Newtonsoft.Json.Converters;
 using Encrypt;
-
+using Newtonsoft.Json.Linq;
 
 namespace Remootio
 {
@@ -102,6 +99,9 @@ namespace Remootio
         const string testurl = "192.168.1.5";  // TEMP
 
         [JsonIgnore]
+        const string Scheme = "ws";
+
+        [JsonIgnore]
         public Uri Uri
         {
             get
@@ -112,7 +112,7 @@ namespace Remootio
                     {
                         Host = IP,
                         Port = Port,
-                        Scheme = "ws",
+                        Scheme = Scheme,
                     };
 
                     _uri = uriBuilder.Uri;
@@ -187,6 +187,19 @@ namespace Remootio
         DateTime? ReplyReceived = null;
 
 
+        /// <summary>
+        /// Returned from QUERY_RESPONSE
+        /// </summary>
+        [JsonIgnore]
+        public string State { get; protected set; }
+
+        /// <summary>
+        /// Returned from QUERY_RESPONSE
+        /// </summary>
+        [JsonIgnore]
+        public string ErrorCode { get; protected set; }
+
+
         #endregion Properties
 
 
@@ -199,7 +212,7 @@ namespace Remootio
         /// <param name="url"></param>
         /// <param name="pingSec"></param>
         /// <param name="start"></param>
-        public Remootio(string IP = testurl, int pingSec = 5, bool start = true)
+        public Remootio(string IP = testurl, int pingSec = 60, bool start = true)
         {
             this.IP = IP;
             this.PingSec = pingSec;
@@ -295,6 +308,7 @@ namespace Remootio
             websocket.OnError += new EventHandler<ErrorEventArgs>(websocket_Error);
             websocket.OnClose += new EventHandler<CloseEventArgs>(websocket_Closed);
 
+            // TEMP - TODO: Connection timeout?
             try
             {
                 websocket.Connect();
@@ -315,13 +329,15 @@ namespace Remootio
         /// </summary>
         void Stop()
         {
+            stopping = true;
+
             if (pingTimer != null)
                 pingTimer.Dispose();
             pingTimer = null;
 
             try
             {
-                if (websocket != null && websocket.IsAlive)
+                if (websocket != null)
                     websocket.Close();
             }
             catch (Exception ex) { }
@@ -333,7 +349,15 @@ namespace Remootio
 
             PingSent = null;
             ReplyReceived = null;
+
+            stopping = false;
         }
+
+
+        /// <summary>
+        /// To ignore any errors and avoid Restart() from websocket_Closed()
+        /// </summary>
+        bool stopping = false;
 
 
         /// <summary>
@@ -372,7 +396,8 @@ namespace Remootio
         {
             Console.WriteLine($"Closed code: {e.Code}, reason '{e.Reason}'");
 
-            Restart();
+            if(!stopping)
+                Restart();
         }
 
 
@@ -385,12 +410,13 @@ namespace Remootio
         {
             Console.WriteLine($"ERROR {e.Exception}");
 
-            Restart();
+            if(!stopping)
+                Restart();
         }
 
 
         /// <summary>
-        /// 
+        /// webSocket received message from Remootio
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
@@ -402,34 +428,41 @@ namespace Remootio
                 Console.WriteLine($"Received binary data");
                 return;
             }
-
-            string json = e.Data;
-            try
+            else
             {
-                Console.WriteLine($"Received {json}");
-
-                // Get type first
-                BASE msg = JsonConvert.DeserializeObject<BASE>(json);
-                ProcessMessage(msg.type, json);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"ERROR: Couldn't deserialize '{json}': {ex}");
+                ProcessMessage(e.Data);
             }
         }
 
 
         /// <summary>
         /// Process Wbsocket Message
+        /// 1. Called from websocket_MessageReceived - without type
+        /// 2. After extracting type - call iself again with the type
+        /// 3. For ENCRYPTED message - decrypt, extract type and call itself on decrypted message
         /// </summary>
         /// <param name="type"></param>
         /// <param name="json"></param>
-        private void ProcessMessage(type type, string json)
+        private void ProcessMessage(string json, type type = type.NOTSET)
         {
             ReplyReceived = DateTime.Now;
+            Console.WriteLine($"Received({type}): {json}");
 
             switch (type)
             {
+                case type.NOTSET:
+                    try
+                    {
+                        // Get type first
+                        BASE msg = JsonConvert.DeserializeObject<BASE>(json);
+                        ProcessMessage(json, msg.type);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"ERROR: Couldn't deserialize '{json}': {ex}");
+                    }
+                    return;
+
                 case type.PONG:
                     return;
 
@@ -439,9 +472,17 @@ namespace Remootio
                     Console.WriteLine($"ERROR: {err.errorMessage}");
                     break;
 
+                // 
                 case type.SERVER_HELLO:
                     var hello = JsonConvert.DeserializeObject<SERVER_HELLO>(json);
                     Console.WriteLine($"HELLO: api: {hello.apiVersion}, {hello.message}");
+                    break;
+
+                // Response to QUERY
+                case type.QUERY:
+                    var query_response = JsonConvert.DeserializeObject<QUERY_RESPONSE>(json);
+                    Console.WriteLine($"QUERY: reply_id: {query_response.id}, state: {query_response.state}");
+                    HandleResponse(query_response);
                     break;
 
                 case type.ENCRYPTED:
@@ -465,15 +506,29 @@ namespace Remootio
             // TEMP - TODO: get type and process!
             // Probably call websocket_MessageReceived with decrypted message
             string payload = aes.DecryptStringFromBytes(enc.data.payload, enc.data.iv);
-            var obj = JsonConvert.DeserializeObject(payload);
+            object obj = JsonConvert.DeserializeObject(payload);
+            if (!(obj is JObject))
+                return;
 
+            JObject jo = obj as JObject;
 
-            HandleChallenge(payload);
+            if (jo["challenge"] != null)
+            {
+                HandleChallenge(payload);
+            }
+            else if (jo["response"] != null)
+            {
+                ProcessMessage(jo["response"].ToString());
+            }
+            else
+            {
+                Console.WriteLine($"Something unexpected received: {payload}");
+            }
         }
 
 
         /// <summary>
-        /// 
+        /// Decode "challenge" reply to AUTH request
         /// </summary>
         /// <param name="enc"></param>
         void HandleChallenge(string payload)
@@ -498,6 +553,20 @@ namespace Remootio
             SendQuery();
         }
 
+
+        /// <summary>
+        /// TEMP - Not sure  pass BASE?
+        /// </summary>
+        /// <param name="resp"></param>
+        void HandleResponse(QUERY_RESPONSE resp)
+        {
+            if (resp == null)
+                return;
+
+            State = resp.state;
+            if(!resp.success)
+                ErrorCode = resp.errorCode;
+        }
 
 
         /// <summary>
@@ -551,7 +620,8 @@ namespace Remootio
         /// </summary>
         public void SendQuery()
         {
-            Send(new QUERY(NextActionId, aes, sIV));
+            QUERY q = new QUERY(NextActionId, aes, sIV);
+            Send(q);
         }
 
 
@@ -563,6 +633,11 @@ namespace Remootio
 
         object websocket_lock = new object();
 
+
+        /// <summary>
+        /// Send the msg to Remootio
+        /// </summary>
+        /// <param name="msg"></param>
         private void Send(object msg)
         {
             try
@@ -612,28 +687,29 @@ namespace Remootio
             Console.WriteLine($"ACTION: {payload}, APIAuthKey: {aes.APIAuthKey}, iv: {iv}");
 
             // create the JSON string for the HMAC calculation
-            encr data = new encr()
+            return new encr()
             {
                 payload = aes.EncryptStringToBytes(payload, sIV: iv),
                 iv = aes.sIV,
             };
-
-            // Pass NullValueHandling.Ignore to ignore null data.mac above
-            string json = JsonConvert.SerializeObject(data, jss);
-
-            data.mac = aes.StringHash(json);
-
-            Console.WriteLine($"ACTION: {json}, mac: {data.mac}");
-
-            return data;
         }
 
+
+        public static string hmac(encr data, AesEncryption aes)
+        {
+            string json = JsonConvert.SerializeObject(data);
+            string mac = aes.StringHash(json);
+
+            Console.WriteLine($"ACTION: {json}, mac: {mac}");
+
+            return mac;
+        }
 
         /// <summary>
         /// Pass NullValueHandling.Ignore to ignore null data.mac above
         /// data.mac above will be set after SerializeObject
         /// </summary>
-        static JsonSerializerSettings jss = new JsonSerializerSettings() { NullValueHandling = NullValueHandling.Ignore };
+        //static JsonSerializerSettings jss = new JsonSerializerSettings() { NullValueHandling = NullValueHandling.Ignore };
 
 
         #endregion Send

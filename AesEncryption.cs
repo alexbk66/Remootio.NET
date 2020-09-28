@@ -155,7 +155,7 @@ namespace Encrypt
 
                 this.IV = aesAlg.IV;
 
-                Console.WriteLine($"Encrypt: {plainText}, Key: {Convert.ToBase64String(Key)}, IV: {Convert.ToBase64String(IV)}");
+                //Console.WriteLine($"Encrypt: {plainText}, Key: {Convert.ToBase64String(Key)}, IV: {Convert.ToBase64String(IV)}");
 
                 // Create an encryptor to perform the stream transform.
                 ICryptoTransform encryptor = aesAlg.CreateEncryptor(aesAlg.Key, aesAlg.IV);
@@ -192,7 +192,7 @@ namespace Encrypt
             byte[] iv = (!String.IsNullOrEmpty(sIV))? Convert.FromBase64String(sIV) : null;
             byte[] encrypted = EncryptStringToBytes(payload, Key, iv);
 
-            Console.WriteLine($"Unencrypted payload({payload.Length} bytes): {payload}, IV: '{this.sIV}'");
+            //Console.WriteLine($"Unencrypted payload({payload.Length} bytes): {payload}, IV: '{this.sIV}'");
 
             return Convert.ToBase64String(encrypted);
         }
@@ -287,7 +287,7 @@ namespace Encrypt
                         {
                             // Read the decrypted bytes from the decrypting stream
                             string payload = srDecrypt.ReadToEnd();
-                            Console.WriteLine($"Decrypted payload({payload.Length} bytes): {payload}, IV: '{IV}'");
+                            Console.WriteLine($"Decrypted payload({payload.Length} bytes): {payload}, IV: '{Convert.ToBase64String(IV)}'");
                             return payload;
                         }
                     }
