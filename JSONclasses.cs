@@ -154,6 +154,31 @@ namespace Remootio
         #region Messages
 
 
+        [Serializable]
+        public class BASE
+        {
+            // setting the order to 1 will only work if you set an order greater than 1 on all other properties. 
+            // By default any property without an Order setting will be given an order of -1. 
+            // So you must either give all serialized properties and order, or set your first item to -2
+            [JsonConverter(typeof(StringEnumConverter))]
+            [JsonProperty(Order = -10)]
+            public type type;
+
+            [JsonConstructor]
+            protected BASE()
+            {
+            }
+
+            protected BASE(type type)
+            {
+                this.type = type;
+            }
+        }
+
+
+        #region Responses
+
+
         public class _Challenge
         {
             public string sessionKey { get; set; }
@@ -170,26 +195,122 @@ namespace Remootio
         }
 
 
-        [Serializable]
-        public class BASE
+        protected class ERROR : BASE
         {
-            // setting the order to 1 will only work if you set an order greater than 1 on all other properties. 
-            // By default any property without an Order setting will be given an order of -1. 
-            // So you must either give all serialized properties and order, or set your first item to -2
-            [JsonConverter(typeof(StringEnumConverter))]
-            [JsonProperty(Order = -10)]
-            public type type;
-
             [JsonConstructor]
-            BASE()
+            public ERROR() : base(type.ERROR) { }
+
+            public string errorMessage;
+        }
+
+
+        protected class BASE_RESPONSE : BASE
+        {
+            [JsonConstructor]
+            BASE_RESPONSE()
             {
             }
 
-            protected BASE(type type)
+            protected BASE_RESPONSE(type type) : base(type)
             {
-                this.type = type;
             }
+
+
+            public string state { get; set; }
+            public string errorCode { get; set; }
+
+            /// <summary>
+            /// shows the time passed since the last restart of the Remootio device in 100ms units
+            /// </summary>
+            public int t100ms { get; set; }
+
+            /// <summary>
+            /// LastActionId
+            /// Only used for replies to the actions, hense Nullable
+            /// </summary>
+            public int? id { get; set; }
+
+            /// <summary>
+            /// Only used for replies to the actions, hense Nullable
+            /// </summary>
+            public bool? success { get; set; }
         }
+
+
+        protected class QUERY_RESPONSE : BASE_RESPONSE
+        {
+            [JsonConstructor]
+            public QUERY_RESPONSE() : base(type.QUERY) { }
+
+            public bool relayTriggered { get; set; }
+        }
+
+
+        protected class SERVER_HELLO : BASE
+        {
+            [JsonConstructor]
+            public SERVER_HELLO() : base(type.SERVER_HELLO) { }
+
+            public int apiVersion;
+            public string message;
+        }
+
+
+        public class TriggerData
+        {
+            /// <summary>
+            /// shows which key has operated the device
+            /// </summary>
+            public int keyNr { get; set; }
+
+            /// <summary>
+            /// "master key" - the key of the Remootio device's owner who has set it up
+            /// "unique key" - the unique keys the owner has shared with other people
+            /// "guest key" - the guest key that can be shared with an unlimited amount of people
+            /// "api key" - "keyType" is "api key" if the event was triggered by this websocket API client
+            /// "smart home" - if the event was triggered by the smart home key used for Alexa, Google Home etc
+            /// </summary>
+            public string keyType { get; set; }
+
+            /// <summary>
+            /// "bluetooth" - event was triggered via Bluetooth
+            /// "wifi" - event was triggered via Wi-Fi
+            /// "internet" - event was triggered via the Internet (EasyConnect)
+            /// "autoopen" - event was triggered by the auto-open feature
+            /// "unknown" - this should normally not happen at all
+            /// </summary>
+            public string via { get; set; }
+        }
+
+
+        /// <summary>
+        /// Remootio sends the following event if it any key has operated
+        /// the Remootio device  (triggered the control output)
+        /// </summary>
+        protected class RelayTrigger : BASE_RESPONSE
+        {
+            [JsonConstructor]
+            public RelayTrigger() : base(type.RelayTrigger) { }
+
+            public int cnt { get; set; }
+            public TriggerData data { get; set; }
+        }
+
+
+        protected class TRIGGER_RESPONSE : BASE_RESPONSE
+        {
+            [JsonConstructor]
+            public TRIGGER_RESPONSE() : base(type.TRIGGER) { }
+
+            public bool relayTriggered { get; set; }
+        }
+
+
+
+        #endregion Responses
+
+
+        #region Requests
 
 
         protected class PING : BASE
@@ -210,6 +331,9 @@ namespace Remootio
         }
 
 
+        /// <summary>
+        /// Both Request and Response
+        /// </summary>
         public class ENCRYPTED : BASE
         {
             [JsonConstructor]
@@ -226,44 +350,10 @@ namespace Remootio
         {
             public string iv;
             public string payload;
-            //public string mac;
         }
 
 
-
-        protected class ERROR : BASE
-        {
-            [JsonConstructor]
-            public ERROR() : base(type.ERROR) { }
-
-            public string errorMessage;
-        }
-
-        protected class QUERY_RESPONSE : BASE
-        {
-            [JsonConstructor]
-            public QUERY_RESPONSE() : base(type.QUERY) { }
-
-            public int id { get; set; }
-            public bool success { get; set; }
-            public string state { get; set; }
-            public int t100ms { get; set; }
-            public bool relayTriggered { get; set; }
-            public string errorCode { get; set; }
-        }
-
-
-        protected class SERVER_HELLO : BASE
-        {
-            [JsonConstructor]
-            public SERVER_HELLO() : base(type.SERVER_HELLO) { }
-
-            public int apiVersion;
-            public string message;
-        }
-         
-
-        #endregion Messages
+        #endregion Requests
 
 
         #region ACTIONS
@@ -360,5 +450,7 @@ namespace Remootio
 
 
         #endregion ACTIONS
+
+        #endregion Messages
     }
 }

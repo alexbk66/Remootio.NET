@@ -203,12 +203,19 @@ namespace Remootio
         [JsonIgnore]
         public string ErrorCode { get; protected set; }
 
+        /// <summary>
+        /// time passed since the last restart
+        /// </summary>
+        [JsonIgnore]
+        public TimeSpan? Uptime { get; protected set; }
+
 
         /// <summary>
         /// WebSocket API version received from SERVER_HELLO
         /// </summary>
         [JsonIgnore]
         public int apiVersion { get; protected set; } = 0;
+
 
         #endregion Properties
 
@@ -482,14 +489,33 @@ namespace Remootio
                     Console.WriteLine($"ERROR: {err.errorMessage}");
                     break;
 
-                // 
+                // Response to HELLO
                 case type.SERVER_HELLO:
                     var hello = JsonConvert.DeserializeObject<SERVER_HELLO>(json);
 
                     apiVersion = hello.apiVersion;
 
                     Console.WriteLine($"HELLO: api: {apiVersion}, {hello.message}");
+
+                    // TEMP!!!
+                    SendTrigger();
+
                     break;
+
+                // events from Remootio
+                case type.RelayTrigger:
+                    // TEMP - TODO: Implement
+                    var @event = JsonConvert.DeserializeObject<RelayTrigger>(json);
+                    HandleResponse(@event);
+
+                    break;
+
+                // Response to TRIGGER
+                case type.TRIGGER:
+                    var trigger_response = JsonConvert.DeserializeObject<TRIGGER_RESPONSE>(json);
+                    HandleResponse(trigger_response);
+                    break;
+
 
                 // Response to QUERY
                 case type.QUERY:
@@ -498,13 +524,14 @@ namespace Remootio
                     HandleResponse(query_response);
                     break;
 
+                // Encrypted message received
                 case type.ENCRYPTED:
                     var enc = JsonConvert.DeserializeObject<ENCRYPTED>(json);
                     HandleEncrypted(enc);
                     break;
 
                 default:
-                    Console.WriteLine($"unknown msg type {type}: {json}");
+                    Console.WriteLine($"ERROR: unknown msg type {type}: {json}");
                     break;
             }
         }
@@ -516,8 +543,6 @@ namespace Remootio
         /// <param name="enc"></param>
         void HandleEncrypted(ENCRYPTED enc)
         {
-            // TEMP - TODO: get type and process!
-            // Probably call websocket_MessageReceived with decrypted message
             string payload = aes.DecryptStringFromBytes(enc.data.payload, enc.data.iv);
             object obj = JsonConvert.DeserializeObject(payload);
             if (!(obj is JObject))
@@ -525,6 +550,7 @@ namespace Remootio
 
             JObject jo = obj as JObject;
 
+            // TEMP - TODO: improve!
             if (jo["challenge"] != null)
             {
                 HandleChallenge(payload);
@@ -532,6 +558,10 @@ namespace Remootio
             else if (jo["response"] != null)
             {
                 ProcessMessage(jo["response"].ToString());
+            }
+            else if (jo["event"] != null)
+            { 
+                ProcessMessage(jo["event"].ToString());
             }
             else
             {
@@ -565,22 +595,26 @@ namespace Remootio
 
 
         /// <summary>
-        /// TEMP - Not sure  pass BASE?
+        /// COMMENT
         /// </summary>
         /// <param name="response">QUERY_RESPONSE</param>
-        void HandleResponse(QUERY_RESPONSE response)
+        void HandleResponse(BASE_RESPONSE response)
         {
             if (response == null)
                 return;
 
+            // TEMP - TODO: use "success"
+            //if (response.success == false)
+            
+            ErrorCode = response.errorCode;
             State = response.state;
-            if (!response.success)
-                ErrorCode = response.errorCode;
+            Uptime = TimeSpan.FromMilliseconds(response.t100ms * 100);
+            Console.WriteLine($"State: {State}, ErrorCode: {ErrorCode}, Uptime: {Uptime}");
 
-            if (LastActionId <= response.id || (response.id == 0 && LastActionId == mask))
+            if (response.id != null && LastActionId <= response.id || (response.id == 0 && LastActionId == mask))
             {
                 // We increment the action id (we actually just set it to be equal to the previous message's ID we've sent)
-                LastActionId = response.id;
+                LastActionId = (int)response.id;
                 Console.WriteLine($"Received response to last action, set LastActionId to {LastActionId}");
 
                 // First time received reply to QUERY - send also HELLO
