@@ -22,11 +22,6 @@ namespace Remootio
     {
         #region Saved (Config) Properties
 
-        /// <summary>
-        /// To keep connection alive need to send PING every 60-90 sec
-        /// </summary>
-        [JsonProperty]
-        public int PingSec { set; get; } = 60;
 
         /// <summary>
         /// Device Name given in the App
@@ -34,6 +29,37 @@ namespace Remootio
         /// </summary>
         [JsonProperty]
         public string Name { set; get; }
+
+
+        /// <summary>
+        /// 
+        /// </summary>
+        public const string NewID = "New Remootio";
+
+        /// <summary>
+        /// Device ID (i.e. Serial Number)
+        /// Not yet available
+        /// For now return 6 chars of APIAuthKey
+        /// </summary>
+        [JsonProperty]
+        public string id
+        {
+            set => _id = value;
+
+            get
+            {
+                if (_id != null)
+                    return _id;
+
+                if (!String.IsNullOrEmpty(APIAuthKey))
+                    return $"{APIAuthKey.Substring(0, 3)}-{APIAuthKey.Substring(APIAuthKey.Length-3)}";
+                else
+                    return NewID;
+            }
+        }
+
+        string _id;
+
 
         [JsonProperty]
         public string APISecretKey
@@ -88,6 +114,12 @@ namespace Remootio
 
         string _IP;
 
+        /// <summary>
+        /// To keep connection alive need to send PING every 60-90 sec
+        /// </summary>
+        [JsonProperty]
+        public int PingSec { set; get; } = 60;
+
 
         #endregion Saved Properties
 
@@ -96,7 +128,7 @@ namespace Remootio
 
 
         [JsonIgnore]
-        const string testurl = "192.168.1.5";  // TEMP
+        const string testurl = "192.168.1.137";  // TEMP
 
         [JsonIgnore]
         const string Scheme = "ws";
@@ -312,7 +344,7 @@ namespace Remootio
         /// <summary>
         /// Open WebSecket connection
         /// </summary>
-        void Start()
+        public void Start()
         {
             if (websocket != null)
                 Stop();
@@ -344,7 +376,7 @@ namespace Remootio
         /// <summary>
         /// 
         /// </summary>
-        void Stop()
+        public void Stop()
         {
             stopping = true;
 
