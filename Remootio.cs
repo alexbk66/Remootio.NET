@@ -143,7 +143,14 @@ namespace Remootio
                         Scheme = Scheme,
                     };
 
-                    _uri = uriBuilder.Uri;
+                    try
+                    {
+                        _uri = uriBuilder.Uri;
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Uri: {ex}");
+                    }
                 }
 
                 return _uri;
@@ -257,7 +264,7 @@ namespace Remootio
         /// <param name="IP"></param>
         /// <param name="start"></param>
         /// <param name="pingSec"></param>
-        public Remootio(string IP, bool start = false, int pingSec = 60)
+        public Remootio(string IP, bool start = false, int pingSec = 15)
         {
             this.IP = IP;
             this.PingSec = pingSec;
@@ -419,7 +426,7 @@ namespace Remootio
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
-        private void websocket_Opened(object sender, EventArgs e)
+        void websocket_Opened(object sender, EventArgs e)
         {
             // To keep connection alive need to send PING every 60-90 sec
             StartPingTimer();
@@ -436,7 +443,7 @@ namespace Remootio
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
-        private void websocket_Closed(object sender, CloseEventArgs e)
+        void websocket_Closed(object sender, CloseEventArgs e)
         {
             //Log($"Closed code: {e.Code}, reason '{e.Reason}'");
 
@@ -452,7 +459,7 @@ namespace Remootio
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
-        private void websocket_Error(object sender, ErrorEventArgs e)
+        void websocket_Error(object sender, ErrorEventArgs e)
         {
             Log($"ERROR {e.Exception}");
 
@@ -466,7 +473,7 @@ namespace Remootio
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
-        private void websocket_MessageReceived(object sender, MessageEventArgs e)
+        void websocket_MessageReceived(object sender, MessageEventArgs e)
         {
             if (!e.IsText)
             {
@@ -477,179 +484,6 @@ namespace Remootio
             else
             {
                 ProcessMessage(e.Data);
-            }
-        }
-
-
-        /// <summary>
-        /// Process Wbsocket Message
-        /// 1. Called from websocket_MessageReceived - without type
-        /// 2. After extracting type - call iself again with the type
-        /// 3. For ENCRYPTED message - decrypt, extract type and call itself on decrypted message
-        /// </summary>
-        /// <param name="type"></param>
-        /// <param name="json"></param>
-        private void ProcessMessage(string json, type type = type.NOTSET)
-        {
-            ReplyReceived = DateTime.Now;
-            Log($"Received({type}): {json}");
-
-            switch (type)
-            {
-                case type.NOTSET:
-                    try
-                    {
-                        // Get type first
-                        BASE msg = JsonConvert.DeserializeObject<BASE>(json);
-                        ProcessMessage(json, msg.type);
-                    }
-                    catch (Exception ex)
-                    {
-                        Log($"ERROR: Couldn't deserialize '{json}'", ex);
-                    }
-                    return;
-
-                case type.PONG:
-                    return;
-
-                case type.ERROR:
-                case type.INPUT_ERROR:
-                    var err = JsonConvert.DeserializeObject<ERROR>(json);
-                    Log(err.errorMessage, true);
-                    break;
-
-                // Response to HELLO
-                case type.SERVER_HELLO:
-                    var hello = JsonConvert.DeserializeObject<SERVER_HELLO>(json);
-
-                    apiVersion = hello.apiVersion;
-
-                    Log($"HELLO: api: {apiVersion}, {hello.message}");
-
-                    // TEMP!!!
-                    SendTrigger();
-
-                    break;
-
-                // events from Remootio
-                case type.RelayTrigger:
-                    // TEMP - TODO: Implement
-                    var @event = JsonConvert.DeserializeObject<RelayTrigger>(json);
-                    HandleResponse(@event);
-
-                    break;
-
-                // Response to TRIGGER
-                case type.TRIGGER:
-                    var trigger_response = JsonConvert.DeserializeObject<TRIGGER_RESPONSE>(json);
-                    HandleResponse(trigger_response);
-                    break;
-
-
-                // Response to QUERY
-                case type.QUERY:
-                    var query_response = JsonConvert.DeserializeObject<QUERY_RESPONSE>(json);
-                    Log($"QUERY: reply_id: {query_response.id}, state: {query_response.state}");
-                    HandleResponse(query_response);
-                    break;
-
-                // Encrypted message received
-                case type.ENCRYPTED:
-                    var enc = JsonConvert.DeserializeObject<ENCRYPTED>(json);
-                    HandleEncrypted(enc);
-                    break;
-
-                default:
-                    Log($"unknown msg type {type}: {json}", true);
-                    break;
-            }
-        }
-
-
-        /// <summary>
-        /// Decrypt and process Encrypted message
-        /// </summary>
-        /// <param name="enc"></param>
-        void HandleEncrypted(ENCRYPTED enc)
-        {
-            string payload = aes.DecryptStringFromBytes(enc.data.payload, enc.data.iv);
-            object obj = JsonConvert.DeserializeObject(payload);
-            if (!(obj is JObject))
-                return;
-
-            JObject jo = obj as JObject;
-
-            // TEMP - TODO: improve!
-            if (jo["challenge"] != null)
-            {
-                HandleChallenge(payload);
-            }
-            else if (jo["response"] != null)
-            {
-                ProcessMessage(jo["response"].ToString());
-            }
-            else if (jo["event"] != null)
-            { 
-                ProcessMessage(jo["event"].ToString());
-            }
-            else
-            {
-                Log($"Something unexpected received: {payload}", true);
-            }
-        }
-
-
-        /// <summary>
-        /// Decode "challenge" reply to AUTH request
-        /// </summary>
-        /// <param name="enc"></param>
-        void HandleChallenge(string payload)
-        {
-            Challenge challenge = JsonConvert.DeserializeObject<Challenge>(payload);
-
-            if (challenge?.challenge != null)
-            {
-                LastActionId = challenge.challenge.initialActionId;
-                string APISessionKey = challenge.challenge.sessionKey;
-                // After authentication use new APISessionKey for encryption
-                // APIAuthKey is used for HMAC calculation
-                aes = new AesEncryption(base64Key: APISessionKey, APIAuthKey: APIAuthKey);
-
-                Log($"initialActionId: {LastActionId}");
-            }
-
-            // Reccomended after AUTH send QUERY
-            SendQuery();
-        }
-
-
-        /// <summary>
-        /// COMMENT
-        /// </summary>
-        /// <param name="response">QUERY_RESPONSE</param>
-        void HandleResponse(BASE_RESPONSE response)
-        {
-            if (response == null)
-                return;
-
-            // TEMP - TODO: use "success"
-            //if (response.success == false)
-            
-            ErrorCode = response.errorCode;
-            State = response.state;
-            Uptime = TimeSpan.FromMilliseconds(response.t100ms * 100);
-            Log($"State: {State}, ErrorCode: {ErrorCode}, Uptime: {Uptime}");
-
-            if (response.id != null && LastActionId <= response.id || (response.id == 0 && LastActionId == mask))
-            {
-                // We increment the action id (we actually just set it to be equal to the previous message's ID we've sent)
-                LastActionId = (int)response.id;
-
-                Log($"Received response to last action, set LastActionId to {LastActionId}");
-
-                // First time received reply to QUERY - send also HELLO
-                if(apiVersion <=0 )
-                    SendHello();
             }
         }
 
@@ -683,6 +517,7 @@ namespace Remootio
         {
             Log(message, true, ex);
         }
+
 
         #endregion Construction
 
@@ -778,9 +613,201 @@ namespace Remootio
         public event EventHandler<ConnectedEventArgs> OnConnectedChanged;
         public event EventHandler<LogEventArgs> OnLog;
 
-        //public event EventHandler<MessageEventArgs> OnMessage;
 
         #endregion Client Events
+
+
+        #region Receive
+
+
+        /// <summary>
+        /// Process Wbsocket Message
+        /// 1. Called from websocket_MessageReceived - without type
+        /// 2. After extracting type - call iself again with the type
+        /// 3. For ENCRYPTED message - decrypt, extract type and call itself on decrypted message
+        /// </summary>
+        /// <param name="type"></param>
+        /// <param name="json"></param>
+        /// <param name="isevent">Event received from Remootio</param>
+        /// <param name="isresponse">Response to Action received, different format to "event"</param>
+        private void ProcessMessage(string json, type type = type.NOTSET, bool isevent = false, bool isresponse = false)
+        {
+            ReplyReceived = DateTime.Now;
+
+            // Avoid double loogin, ProcessMessage will be called againg with proper type
+            if(type != type.NOTSET)
+                Log($"Received({type}): {json}");
+
+            switch (type)
+            {
+                case type.NOTSET:
+                    try
+                    {
+                        // Get type first
+                        BASE msg = JsonConvert.DeserializeObject<BASE>(json);
+                        ProcessMessage(json, msg.type);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"ERROR: Couldn't deserialize '{json}'", ex);
+                    }
+                    return;
+
+                case type.PONG:
+                    return;
+
+                case type.ERROR:
+                case type.INPUT_ERROR:
+                    var err = JsonConvert.DeserializeObject<ERROR>(json);
+                    Log(err.errorMessage, true);
+                    break;
+
+                // Response to HELLO
+                case type.SERVER_HELLO:
+                    var hello = JsonConvert.DeserializeObject<SERVER_HELLO>(json);
+
+                    apiVersion = hello.apiVersion;
+
+                    Log($"HELLO: api: {apiVersion}, {hello.message}");
+
+                    // TEMP!!!
+                    SendTrigger();
+
+                    break;
+
+                // events from Remootio
+                case type.RelayTrigger:
+                    // TEMP - TODO: Implement
+                    var @event = JsonConvert.DeserializeObject<RelayTrigger>(json);
+                    HandleResponse(@event);
+
+                    break;
+
+                // Response to TRIGGER
+                case type.TRIGGER:
+                    var trigger_response = JsonConvert.DeserializeObject<TRIGGER_RESPONSE>(json);
+                    HandleResponse(trigger_response);
+                    break;
+
+
+                // Response to RESTART, or
+                // Restart event received
+                case type.Restart:
+                    var restart = JsonConvert.DeserializeObject<BASE_RESPONSE>(json);
+                    HandleResponse(restart);
+                    Log($"Device Restarted {Uptime}", error: true);
+                    break;
+
+
+                // Response to QUERY
+                case type.QUERY:
+                    var query_response = JsonConvert.DeserializeObject<QUERY_RESPONSE>(json);
+                    Log($"QUERY: reply_id: {query_response.id}, state: {query_response.state}");
+                    HandleResponse(query_response);
+                    break;
+
+                // Encrypted message received
+                case type.ENCRYPTED:
+                    var enc = JsonConvert.DeserializeObject<ENCRYPTED>(json);
+                    HandleEncrypted(enc);
+                    break;
+
+                default:
+                    Log($"unknown msg type {type}: {json}", true);
+                    break;
+            }
+        }
+
+
+        /// <summary>
+        /// Decrypt and process Encrypted message
+        /// </summary>
+        /// <param name="enc"></param>
+        void HandleEncrypted(ENCRYPTED enc)
+        {
+            string payload = aes.DecryptStringFromBytes(enc.data.payload, enc.data.iv);
+            object obj = JsonConvert.DeserializeObject(payload);
+            if (!(obj is JObject))
+                return;
+
+            JObject jo = obj as JObject;
+
+            // TEMP - TODO: improve!
+            if (jo["challenge"] != null)
+            {
+                HandleChallenge(payload);
+            }
+            else if (jo["response"] != null)
+            {
+                ProcessMessage(jo["response"].ToString(), isresponse: true);
+            }
+            else if (jo["event"] != null)
+            {
+                ProcessMessage(jo["event"].ToString(), isevent: true);
+            }
+            else
+            {
+                Log($"Something unexpected received: {payload}", true);
+            }
+        }
+
+
+        /// <summary>
+        /// Decode "challenge" reply to AUTH request
+        /// </summary>
+        /// <param name="enc"></param>
+        void HandleChallenge(string payload)
+        {
+            Challenge challenge = JsonConvert.DeserializeObject<Challenge>(payload);
+
+            if (challenge?.challenge != null)
+            {
+                LastActionId = challenge.challenge.initialActionId;
+                string APISessionKey = challenge.challenge.sessionKey;
+                // After authentication use new APISessionKey for encryption
+                // APIAuthKey is used for HMAC calculation
+                aes = new AesEncryption(base64Key: APISessionKey, APIAuthKey: APIAuthKey);
+
+                Log($"initialActionId: {LastActionId}");
+            }
+
+            // Reccomended after AUTH send QUERY
+            SendQuery();
+        }
+
+
+        /// <summary>
+        /// COMMENT
+        /// </summary>
+        /// <param name="response">QUERY_RESPONSE</param>
+        void HandleResponse(BASE_RESPONSE response)
+        {
+            if (response == null)
+                return;
+
+            // TEMP - TODO: use "success"
+            //if (response.success == false)
+
+            ErrorCode = response.errorCode;
+            State = response.state;
+            Uptime = TimeSpan.FromMilliseconds(response.t100ms * 100);
+            Log($"State: {State}, ErrorCode: {ErrorCode}, Uptime: {Uptime}");
+
+            if (response.id != null && LastActionId <= response.id || (response.id == 0 && LastActionId == mask))
+            {
+                // We increment the action id (we actually just set it to be equal to the previous message's ID we've sent)
+                LastActionId = (int)response.id;
+
+                Log($"Received response to last action, set LastActionId to {LastActionId}");
+
+                // First time received reply to QUERY - send also HELLO
+                if (apiVersion <= 0)
+                    SendHello();
+            }
+        }
+
+
+        #endregion Receive
 
 
         #region Send
