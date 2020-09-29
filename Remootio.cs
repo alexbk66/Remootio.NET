@@ -176,10 +176,13 @@ namespace Remootio
         int pingMsec => PingSec* 1000;
 
         [JsonIgnore]
+        AesEncryption aes;
+
+        [JsonIgnore]
         WebSocket websocket;
 
         [JsonIgnore]
-        AesEncryption aes;
+        public bool Connected => websocket != null && websocket.ReadyState == WebSocketState.Open;
 
         [JsonIgnore]
         bool authenticated = false;
@@ -188,7 +191,7 @@ namespace Remootio
         /// Should be null normally - then IV will be generated in EncryptStringToBytes
         /// </summary>
         [JsonIgnore]
-        string sIV = "9FbUN/uLWXpQTLpnI56P7A==";  // TEMP
+        string sIV = null; //"9FbUN/uLWXpQTLpnI56P7A==";
 
 
         /// <summary>
@@ -343,6 +346,12 @@ namespace Remootio
 
         /// <summary>
         /// Open WebSecket connection
+        /// Connect starts the initalisation chain:
+        /// 1. Connect()
+        /// 2. websocket_Opened()
+        /// 3. SendAuth()
+        /// 4. HandleResponse()
+        /// 5. SendHello()
         /// </summary>
         public void Start()
         {
@@ -357,9 +366,9 @@ namespace Remootio
             websocket.OnError += new EventHandler<ErrorEventArgs>(websocket_Error);
             websocket.OnClose += new EventHandler<CloseEventArgs>(websocket_Closed);
 
-            // TEMP - TODO: Connection timeout?
             try
             {
+                // Starts the initalisation chain:
                 websocket.Connect();
             }
             catch (SocketException ex)
@@ -374,7 +383,7 @@ namespace Remootio
 
 
         /// <summary>
-        /// 
+        /// Reset everything
         /// </summary>
         public void Stop()
         {
@@ -384,12 +393,9 @@ namespace Remootio
                 pingTimer.Dispose();
             pingTimer = null;
 
-            try
-            {
-                if (websocket != null)
-                    websocket.Close();
-            }
-            catch (Exception ex) { }
+            if (Connected)
+                websocket.Close();
+
             websocket = null;
 
             authenticated = false;
@@ -410,19 +416,28 @@ namespace Remootio
 
 
         /// <summary>
-        /// 
+        /// Restart WebSocket
         /// </summary>
-        /// <param name="wait"></param>
-        void Restart(int wait = 500)
+        /// <param name="useTimer">Restart from timer callback</param>
+        /// <param name="wait">Wait between Stop/Start</param>
+        void Restart(bool useTimer = false, int wait = 500)
         {
+            if (useTimer)
+            {
+                StartPingTimer(wait);
+                return;
+            }
+
             Stop();
+
             Thread.Sleep(wait);
+
             Start();
         }
 
 
         /// <summary>
-        /// 
+        /// Callback from WebSocket
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
@@ -439,32 +454,33 @@ namespace Remootio
 
 
         /// <summary>
-        /// 
+        /// Callback from WebSocket
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
         void websocket_Closed(object sender, CloseEventArgs e)
         {
-            //Log($"Closed code: {e.Code}, reason '{e.Reason}'");
-
-            OnConnectedChanged?.Invoke(this, new ConnectedEventArgs(false, e.Code, e.Reason));
-
             if (!stopping)
-                Restart();
+            {
+                //Log($"Closed code: {e.Code}, reason '{e.Reason}'");
+                OnConnectedChanged?.Invoke(this, new ConnectedEventArgs(false, e.Code, e.Reason));
+                Restart(useTimer: true);
+            }
         }
 
 
         /// <summary>
-        /// 
+        /// Callback from WebSocket
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
         void websocket_Error(object sender, ErrorEventArgs e)
         {
-            Log($"ERROR {e.Exception}");
-
-            if(!stopping)
-                Restart();
+            if (!stopping)
+            {
+                Log(e.Message, e.Exception);
+                Restart(useTimer: true);
+            }
         }
 
 
@@ -499,9 +515,19 @@ namespace Remootio
         }
 
 
-        void StartPingTimer()
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="dueMs"></param>
+        void StartPingTimer(int dueMs = -1)
         {
-            pingTimer = new Timer(TimerCallback, this, pingMsec, pingMsec);
+            if (dueMs == -1)
+                dueMs = pingMsec;
+
+            if (pingTimer == null)
+                pingTimer = new Timer(TimerCallback);
+            
+            pingTimer.Change(pingMsec, pingMsec);
         }
 
 
@@ -509,9 +535,9 @@ namespace Remootio
         {
             //string what = ex != null ? "Exception" : error ? "Error" : "Message";
             //Console.WriteLine($"{what}: '{message}' {ex}");
-
             OnLog?.Invoke(this, new LogEventArgs(message, error, ex));
         }
+
 
         void Log(string message, Exception ex)
         {
@@ -610,8 +636,24 @@ namespace Remootio
         }
 
 
+        public class StatusEventArgs : EventArgs
+        {
+            public StatusEventArgs(string State, string ErrorCode, TimeSpan? Uptime)
+            {
+                this.State = State;
+                this.ErrorCode = ErrorCode;
+                this.Uptime = Uptime;
+            }
+
+            public string ErrorCode { get; }
+            public string State { get; }
+            public TimeSpan? Uptime { get; }
+        }
+
+
         public event EventHandler<ConnectedEventArgs> OnConnectedChanged;
         public event EventHandler<LogEventArgs> OnLog;
+        public event EventHandler<StatusEventArgs> OnStatus;
 
 
         #endregion Client Events
@@ -653,14 +695,17 @@ namespace Remootio
                     }
                     return;
 
+
                 case type.PONG:
                     return;
+
 
                 case type.ERROR:
                 case type.INPUT_ERROR:
                     var err = JsonConvert.DeserializeObject<ERROR>(json);
                     Log(err.errorMessage, true);
                     break;
+
 
                 // Response to HELLO
                 case type.SERVER_HELLO:
@@ -675,13 +720,14 @@ namespace Remootio
 
                     break;
 
+
                 // events from Remootio
                 case type.RelayTrigger:
                     // TEMP - TODO: Implement
                     var @event = JsonConvert.DeserializeObject<RelayTrigger>(json);
                     HandleResponse(@event);
-
                     break;
+
 
                 // Response to TRIGGER
                 case type.TRIGGER:
@@ -706,11 +752,13 @@ namespace Remootio
                     HandleResponse(query_response);
                     break;
 
+
                 // Encrypted message received
                 case type.ENCRYPTED:
                     var enc = JsonConvert.DeserializeObject<ENCRYPTED>(json);
                     HandleEncrypted(enc);
                     break;
+
 
                 default:
                     Log($"unknown msg type {type}: {json}", true);
@@ -793,6 +841,8 @@ namespace Remootio
             Uptime = TimeSpan.FromMilliseconds(response.t100ms * 100);
             Log($"State: {State}, ErrorCode: {ErrorCode}, Uptime: {Uptime}");
 
+            OnStatus?.Invoke(this, new StatusEventArgs(State, ErrorCode, Uptime));
+
             if (response.id != null && LastActionId <= response.id || (response.id == 0 && LastActionId == mask))
             {
                 // We increment the action id (we actually just set it to be equal to the previous message's ID we've sent)
@@ -829,12 +879,16 @@ namespace Remootio
 
                 lock (websocket_lock)
                 {
-                    if (websocket == null)
+                    if (!Connected)
                     {
-                        Log($"Sending {msg} - but websocket is closed, trying to open", true);
+                        Log($"Sending {json} - but websocket is '{websocket?.ReadyState}', trying to open", true);
                         Start();
                     }
-                    websocket.Send(json);
+                    else
+                    {
+                        websocket.Send(json);
+                    }
+
                     return;
                 }
             }
@@ -847,7 +901,7 @@ namespace Remootio
                 Log($"Send: Exception", ex);
             }
 
-            Restart();
+            Restart(useTimer: true);
         }
 
 
