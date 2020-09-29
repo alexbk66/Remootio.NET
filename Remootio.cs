@@ -99,7 +99,6 @@ namespace Remootio
         [JsonProperty]
         public string IP
         {
-            //get => Uri?.ToString();
             get => _IP;
 
             set
@@ -134,7 +133,7 @@ namespace Remootio
         {
             get
             {
-                if (_uri == null)
+                if (_uri == null && !String.IsNullOrEmpty(IP))
                 {
                     UriBuilder uriBuilder = new UriBuilder()
                     {
@@ -182,7 +181,7 @@ namespace Remootio
         WebSocket websocket;
 
         [JsonIgnore]
-        public bool Connected => websocket != null && websocket.ReadyState == WebSocketState.Open;
+        public bool IsConnected => websocket != null && websocket.ReadyState == WebSocketState.Open;
 
         [JsonIgnore]
         bool authenticated = false;
@@ -358,6 +357,9 @@ namespace Remootio
             if (websocket != null)
                 Stop();
 
+            if (BadIP)
+                return;
+
             aes = new AesEncryption(APISecretKey: APISecretKey);
 
             websocket = new WebSocket(url);
@@ -393,7 +395,7 @@ namespace Remootio
                 pingTimer.Dispose();
             pingTimer = null;
 
-            if (Connected)
+            if (IsConnected)
                 websocket.Close();
 
             websocket = null;
@@ -680,6 +682,9 @@ namespace Remootio
             if(type != type.NOTSET)
                 Log($"Received({type}): {json}");
 
+            // Note: Not every message is derived from BASE_RESPONSE
+            BASE_RESPONSE response = null;
+
             switch (type)
             {
                 case type.NOTSET:
@@ -696,60 +701,8 @@ namespace Remootio
                     return;
 
 
+                // Reply to PING
                 case type.PONG:
-                    return;
-
-
-                case type.ERROR:
-                case type.INPUT_ERROR:
-                    var err = JsonConvert.DeserializeObject<ERROR>(json);
-                    Log(err.errorMessage, true);
-                    break;
-
-
-                // Response to HELLO
-                case type.SERVER_HELLO:
-                    var hello = JsonConvert.DeserializeObject<SERVER_HELLO>(json);
-
-                    apiVersion = hello.apiVersion;
-
-                    Log($"HELLO: api: {apiVersion}, {hello.message}");
-
-                    // TEMP!!!
-                    SendTrigger();
-
-                    break;
-
-
-                // events from Remootio
-                case type.RelayTrigger:
-                    // TEMP - TODO: Implement
-                    var @event = JsonConvert.DeserializeObject<RelayTrigger>(json);
-                    HandleResponse(@event);
-                    break;
-
-
-                // Response to TRIGGER
-                case type.TRIGGER:
-                    var trigger_response = JsonConvert.DeserializeObject<TRIGGER_RESPONSE>(json);
-                    HandleResponse(trigger_response);
-                    break;
-
-
-                // Response to RESTART, or
-                // Restart event received
-                case type.Restart:
-                    var restart = JsonConvert.DeserializeObject<BASE_RESPONSE>(json);
-                    HandleResponse(restart);
-                    Log($"Device Restarted {Uptime}", error: true);
-                    break;
-
-
-                // Response to QUERY
-                case type.QUERY:
-                    var query_response = JsonConvert.DeserializeObject<QUERY_RESPONSE>(json);
-                    Log($"QUERY: reply_id: {query_response.id}, state: {query_response.state}");
-                    HandleResponse(query_response);
                     break;
 
 
@@ -760,10 +713,80 @@ namespace Remootio
                     break;
 
 
+                // Error received fron Remootio
+                case type.ERROR:
+                case type.INPUT_ERROR:
+                    var err = JsonConvert.DeserializeObject<ERROR>(json);
+                    Log(err.errorMessage, true);
+                    break;
+
+
+                // Response to HELLO
+                case type.SERVER_HELLO:
+                    var hello = JsonConvert.DeserializeObject<SERVER_HELLO>(json);
+                    apiVersion = hello.apiVersion;
+                    Log($"HELLO: api: {apiVersion}, {hello.message}");
+                    break;
+
+
+                //=== events from Remootio ===//
+
+                case type.RelayTrigger:
+                    response = JsonConvert.DeserializeObject<RelayTrigger>(json);
+                    break;
+
+
+                case type.Connected:
+                    response = JsonConvert.DeserializeObject<Connected>(json);
+                    break;
+
+
+                // Response to TRIGGER
+                case type.TRIGGER:
+                    response = JsonConvert.DeserializeObject<TRIGGER_RESPONSE>(json);
+                    break;
+
+
+                case type.StateChange:
+                    response = JsonConvert.DeserializeObject<BASE_RESPONSE>(json);
+                    break;
+
+
+                // Response to RESTART, or
+                // Restart event received
+                case type.Restart:
+                    response = JsonConvert.DeserializeObject<BASE_RESPONSE>(json);
+                    Log($"Device Restarted", error: true);
+                    break;
+
+
+                // Response to QUERY
+                case type.QUERY:
+                    response = JsonConvert.DeserializeObject<QUERY_RESPONSE>(json);
+                    break;
+
+
                 default:
                     Log($"unknown msg type {type}: {json}", true);
+
+                    try
+                    {
+                        // Just try if this unknown message is BASE_RESPONSE
+                        response = JsonConvert.DeserializeObject<BASE_RESPONSE>(json);
+                    }
+                    catch (Exception ex)
+                    {
+                    }
                     break;
             }
+
+            if (response != null)
+            {
+                HandleResponse(response);
+            }
+
+            // Restart timer if comms received
+            StartPingTimer();
         }
 
 
@@ -839,7 +862,8 @@ namespace Remootio
             ErrorCode = response.errorCode;
             State = response.state;
             Uptime = TimeSpan.FromMilliseconds(response.t100ms * 100);
-            Log($"State: {State}, ErrorCode: {ErrorCode}, Uptime: {Uptime}");
+
+            Log($"State: '{State}' {(!String.IsNullOrEmpty(ErrorCode) ? " ErrorCode: '{ErrorCode}'" : "")} Uptime: {Uptime}");
 
             OnStatus?.Invoke(this, new StatusEventArgs(State, ErrorCode, Uptime));
 
@@ -879,7 +903,7 @@ namespace Remootio
 
                 lock (websocket_lock)
                 {
-                    if (!Connected)
+                    if (!IsConnected)
                     {
                         Log($"Sending {json} - but websocket is '{websocket?.ReadyState}', trying to open", true);
                         Start();

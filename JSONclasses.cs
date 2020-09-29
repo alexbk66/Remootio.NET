@@ -176,7 +176,7 @@ namespace Remootio
         }
 
 
-        #region Responses
+        #region Responses / Events
 
 
         public class _Challenge
@@ -204,48 +204,6 @@ namespace Remootio
         }
 
 
-        protected class BASE_RESPONSE : BASE
-        {
-            [JsonConstructor]
-            BASE_RESPONSE()
-            {
-            }
-
-            protected BASE_RESPONSE(type type) : base(type)
-            {
-            }
-
-
-            public string state { get; set; }
-            public string errorCode { get; set; }
-
-            /// <summary>
-            /// shows the time passed since the last restart of the Remootio device in 100ms units
-            /// </summary>
-            public int t100ms { get; set; }
-
-            /// <summary>
-            /// LastActionId
-            /// Only used for replies to the actions, hense Nullable
-            /// </summary>
-            public int? id { get; set; }
-
-            /// <summary>
-            /// Only used for replies to the actions, hense Nullable
-            /// </summary>
-            public bool? success { get; set; }
-        }
-
-
-        protected class QUERY_RESPONSE : BASE_RESPONSE
-        {
-            [JsonConstructor]
-            public QUERY_RESPONSE() : base(type.QUERY) { }
-
-            public bool relayTriggered { get; set; }
-        }
-
-
         protected class SERVER_HELLO : BASE
         {
             [JsonConstructor]
@@ -256,7 +214,11 @@ namespace Remootio
         }
 
 
-        public class TriggerData
+
+        /// <summary>
+        /// Which key caused an event (Connected, RelayTrigger, etc?)
+        /// </summary>
+        public class KeyData
         {
             /// <summary>
             /// shows which key has operated the device
@@ -283,6 +245,63 @@ namespace Remootio
         }
 
 
+        protected class BASE_RESPONSE : BASE
+        {
+            [JsonConstructor]
+            BASE_RESPONSE()
+            {
+            }
+
+            protected BASE_RESPONSE(type type) : base(type)
+            {
+            }
+
+
+            /// <summary>
+            /// State open/closed (or no sensor)
+            /// </summary>
+            public string state { get; set; }
+
+            public string errorCode { get; set; }
+
+            /// <summary>
+            /// shows the time passed since the last restart of the Remootio device in 100ms units
+            /// </summary>
+            public int t100ms { get; set; }
+
+            /// <summary>
+            /// LastActionId
+            /// Only used for replies to the actions, hense Nullable
+            /// </summary>
+            public int? id { get; set; }
+
+            /// <summary>
+            /// Some events have counter
+            /// Only used for replies to the actions, hense Nullable
+            /// </summary>
+            public int? cnt { get; set; }
+
+            /// <summary>
+            /// Only used for replies to the actions, hense Nullable
+            /// </summary>
+            public bool? success { get; set; }
+
+            /// <summary>
+            /// Which key caused an event (Connected, RelayTrigger, etc?)
+            /// </summary>
+            public KeyData data { get; set; }
+        }
+
+
+        protected class QUERY_RESPONSE : BASE_RESPONSE
+        {
+            [JsonConstructor]
+            public QUERY_RESPONSE() : base(type.QUERY) { }
+
+            public bool relayTriggered { get; set; }
+        }
+
+
         /// <summary>
         /// Remootio sends the following event if it any key has operated
         /// the Remootio device  (triggered the control output)
@@ -291,9 +310,16 @@ namespace Remootio
         {
             [JsonConstructor]
             public RelayTrigger() : base(type.RelayTrigger) { }
+        }
 
-            public int cnt { get; set; }
-            public TriggerData data { get; set; }
+
+        /// <summary>
+        /// Remootio sends the following event if any key has connected to the Remootio device
+        /// </summary>
+        protected class Connected : BASE_RESPONSE
+        {
+            [JsonConstructor]
+            public Connected() : base(type.Connected) { }
         }
 
 
