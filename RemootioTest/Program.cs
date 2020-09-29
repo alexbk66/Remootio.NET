@@ -53,7 +53,18 @@ namespace RemootioTest
             //TestACTION(test2);
 
             // Now test Remootio client
-            var r = new Remootio.Remootio();
+            TestRemootio();
+        }
+
+
+        static void TestRemootio()
+        {
+            var r = new Remootio.Remootio("192.168.1.137", false);
+
+            r.OnConnectedChanged += R_OnConnectedChanged;
+            r.OnLog += R_OnLog;
+
+            r.Start();
 
             while (true)
             {
@@ -61,6 +72,20 @@ namespace RemootioTest
             }
         }
 
+
+        private static void R_OnConnectedChanged(object sender, ConnectedEventArgs e)
+        {
+            if(e.connected)
+                Console.WriteLine($"WebSocket Connected");
+            else
+                Console.WriteLine($"WebSocket Closed code: {e.Code}, reason '{e.Reason}'");
+        }
+
+        private static void R_OnLog(object sender, LogEventArgs e)
+        {
+            string what = e.exception != null ? "Exception" : e.error ? "Error" : "Message";
+            Console.WriteLine($"{what}: '{e.message}' {e.exception}");
+        }
 
         static void TestACTION(TestData t)
         {

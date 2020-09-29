@@ -126,10 +126,6 @@ namespace Remootio
 
         #region Properties
 
-
-        [JsonIgnore]
-        const string testurl = "192.168.1.137";  // TEMP
-
         [JsonIgnore]
         const string Scheme = "ws";
 
@@ -258,18 +254,15 @@ namespace Remootio
         /// <summary>
         /// Ctor
         /// </summary>
-        /// <param name="url"></param>
-        /// <param name="pingSec"></param>
+        /// <param name="IP"></param>
         /// <param name="start"></param>
-        public Remootio(string IP = testurl, int pingSec = 60, bool start = true)
+        /// <param name="pingSec"></param>
+        public Remootio(string IP, bool start = false, int pingSec = 60)
         {
             this.IP = IP;
             this.PingSec = pingSec;
             if (start)
                 Start();
-
-            //string json = ConfigJson;
-            //Remootio test = Remootio.FromJson(json);
         }
 
 
@@ -315,7 +308,7 @@ namespace Remootio
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"FromJson({json}): {ex}");
+                Console.WriteLine($"FromJson({json})", ex);
             }
             return null;
         }
@@ -364,11 +357,11 @@ namespace Remootio
             }
             catch (SocketException ex)
             {
-                Console.WriteLine($"SocketException {ex}");
+                Log($"Start: SocketException", ex);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Exception {ex}");
+                Log($"Start: tException", ex);
             }
         }
 
@@ -431,6 +424,8 @@ namespace Remootio
             // To keep connection alive need to send PING every 60-90 sec
             StartPingTimer();
 
+            OnConnectedChanged?.Invoke(this, new ConnectedEventArgs(true));
+
             if (!authenticated)
                 SendAuth();
         }
@@ -443,9 +438,11 @@ namespace Remootio
         /// <param name="e"></param>
         private void websocket_Closed(object sender, CloseEventArgs e)
         {
-            Console.WriteLine($"Closed code: {e.Code}, reason '{e.Reason}'");
+            //Log($"Closed code: {e.Code}, reason '{e.Reason}'");
 
-            if(!stopping)
+            OnConnectedChanged?.Invoke(this, new ConnectedEventArgs(false, e.Code, e.Reason));
+
+            if (!stopping)
                 Restart();
         }
 
@@ -457,7 +454,7 @@ namespace Remootio
         /// <param name="e"></param>
         private void websocket_Error(object sender, ErrorEventArgs e)
         {
-            Console.WriteLine($"ERROR {e.Exception}");
+            Log($"ERROR {e.Exception}");
 
             if(!stopping)
                 Restart();
@@ -474,7 +471,7 @@ namespace Remootio
             if (!e.IsText)
             {
                 // use e.RawData
-                Console.WriteLine($"Received binary data");
+                Log($"Received binary data", true);
                 return;
             }
             else
@@ -495,7 +492,7 @@ namespace Remootio
         private void ProcessMessage(string json, type type = type.NOTSET)
         {
             ReplyReceived = DateTime.Now;
-            Console.WriteLine($"Received({type}): {json}");
+            Log($"Received({type}): {json}");
 
             switch (type)
             {
@@ -508,7 +505,7 @@ namespace Remootio
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"ERROR: Couldn't deserialize '{json}': {ex}");
+                        Log($"ERROR: Couldn't deserialize '{json}'", ex);
                     }
                     return;
 
@@ -518,7 +515,7 @@ namespace Remootio
                 case type.ERROR:
                 case type.INPUT_ERROR:
                     var err = JsonConvert.DeserializeObject<ERROR>(json);
-                    Console.WriteLine($"ERROR: {err.errorMessage}");
+                    Log(err.errorMessage, true);
                     break;
 
                 // Response to HELLO
@@ -527,7 +524,7 @@ namespace Remootio
 
                     apiVersion = hello.apiVersion;
 
-                    Console.WriteLine($"HELLO: api: {apiVersion}, {hello.message}");
+                    Log($"HELLO: api: {apiVersion}, {hello.message}");
 
                     // TEMP!!!
                     SendTrigger();
@@ -552,7 +549,7 @@ namespace Remootio
                 // Response to QUERY
                 case type.QUERY:
                     var query_response = JsonConvert.DeserializeObject<QUERY_RESPONSE>(json);
-                    Console.WriteLine($"QUERY: reply_id: {query_response.id}, state: {query_response.state}");
+                    Log($"QUERY: reply_id: {query_response.id}, state: {query_response.state}");
                     HandleResponse(query_response);
                     break;
 
@@ -563,7 +560,7 @@ namespace Remootio
                     break;
 
                 default:
-                    Console.WriteLine($"ERROR: unknown msg type {type}: {json}");
+                    Log($"unknown msg type {type}: {json}", true);
                     break;
             }
         }
@@ -597,7 +594,7 @@ namespace Remootio
             }
             else
             {
-                Console.WriteLine($"Something unexpected received: {payload}");
+                Log($"Something unexpected received: {payload}", true);
             }
         }
 
@@ -618,7 +615,7 @@ namespace Remootio
                 // APIAuthKey is used for HMAC calculation
                 aes = new AesEncryption(base64Key: APISessionKey, APIAuthKey: APIAuthKey);
 
-                Console.WriteLine($"initialActionId: {LastActionId}");
+                Log($"initialActionId: {LastActionId}");
             }
 
             // Reccomended after AUTH send QUERY
@@ -641,13 +638,14 @@ namespace Remootio
             ErrorCode = response.errorCode;
             State = response.state;
             Uptime = TimeSpan.FromMilliseconds(response.t100ms * 100);
-            Console.WriteLine($"State: {State}, ErrorCode: {ErrorCode}, Uptime: {Uptime}");
+            Log($"State: {State}, ErrorCode: {ErrorCode}, Uptime: {Uptime}");
 
             if (response.id != null && LastActionId <= response.id || (response.id == 0 && LastActionId == mask))
             {
                 // We increment the action id (we actually just set it to be equal to the previous message's ID we've sent)
                 LastActionId = (int)response.id;
-                Console.WriteLine($"Received response to last action, set LastActionId to {LastActionId}");
+
+                Log($"Received response to last action, set LastActionId to {LastActionId}");
 
                 // First time received reply to QUERY - send also HELLO
                 if(apiVersion <=0 )
@@ -672,6 +670,19 @@ namespace Remootio
             pingTimer = new Timer(TimerCallback, this, pingMsec, pingMsec);
         }
 
+
+        void Log(string message, bool error = false, Exception ex = null)
+        {
+            //string what = ex != null ? "Exception" : error ? "Error" : "Message";
+            //Console.WriteLine($"{what}: '{message}' {ex}");
+
+            OnLog?.Invoke(this, new LogEventArgs(message, error, ex));
+        }
+
+        void Log(string message, Exception ex)
+        {
+            Log(message, true, ex);
+        }
 
         #endregion Construction
 
@@ -731,7 +742,49 @@ namespace Remootio
         #endregion Public Methods
 
 
+        #region Client Events
+
+
+        public class ConnectedEventArgs : EventArgs
+        {
+            public ConnectedEventArgs(bool connected, ushort Code = 0, string Reason = null)
+            {
+                this.connected = connected;
+                this.Code = Code;
+                this.Reason = Reason;
+            }
+
+            public bool connected { get; }
+            public ushort Code { get; }
+            public string Reason { get; }
+        }
+
+
+        public class LogEventArgs : EventArgs
+        {
+            public LogEventArgs(string message, bool error, Exception ex = null)
+            {
+                this.error = error;
+                this.message = message;
+                this.exception = ex;
+            }
+
+            public bool error { get; }
+            public Exception exception { get; }
+            public string message { get; }
+        }
+
+
+        public event EventHandler<ConnectedEventArgs> OnConnectedChanged;
+        public event EventHandler<LogEventArgs> OnLog;
+
+        //public event EventHandler<MessageEventArgs> OnMessage;
+
+        #endregion Client Events
+
+
         #region Send
+
 
         object websocket_lock = new object();
 
@@ -745,13 +798,13 @@ namespace Remootio
             try
             {
                 string json = JsonConvert.SerializeObject(msg);
-                Console.WriteLine($"Send: {json}");
+                Log($"Send: {json}");
 
                 lock (websocket_lock)
                 {
                     if (websocket == null)
                     {
-                        Console.WriteLine($"Sending {msg} - but websocket is closed, trying to open");
+                        Log($"Sending {msg} - but websocket is closed, trying to open", true);
                         Start();
                     }
                     websocket.Send(json);
@@ -760,11 +813,11 @@ namespace Remootio
             }
             catch (SocketException ex)
             {
-                Console.WriteLine($"SocketException {ex}");
+                Log($"Send: SocketException", ex);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Exception {ex}");
+                Log($"Send: Exception", ex);
             }
 
             Restart();
