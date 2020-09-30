@@ -15,6 +15,7 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Converters;
 using Encrypt;
 using Newtonsoft.Json.Linq;
+using System.ComponentModel;
 
 namespace Remootio
 {
@@ -72,7 +73,7 @@ namespace Remootio
             }
         }
 
-        string _APISecretKey = "B48C7A34CC64F9E421A64985328619AB6CF1878ECD1649F5E8322F1FE28C93C8";  // TEMP
+        string _APISecretKey = null;
 
 
         [JsonProperty]
@@ -86,7 +87,7 @@ namespace Remootio
             }
         }
 
-        string _APIAuthKey = "EAF97466F0DB4B7BA11AEC9DFFAFBA0D6670FF13FD89377527F104FB5AB62414";  // TEMP
+        string _APIAuthKey = null;
 
 
         /// <summary>
@@ -332,14 +333,22 @@ namespace Remootio
         /// <param name="APIAuthKey"></param>
         public void SetIpPort(string IP, short port, string APISecretKey = null, string APIAuthKey = null)
         {
-            this.IP = IP;
-            this.Port = port;
+            try
+            {
+                this.IP = IP;
+                this.Port = port;
 
-            if (APISecretKey != null)
-                this.APISecretKey = APISecretKey;
+                if (APISecretKey != null)
+                    this.APISecretKey = APISecretKey;
 
-            if (APIAuthKey != null)
-                this.APIAuthKey = APIAuthKey;
+                if (APIAuthKey != null)
+                    this.APIAuthKey = APIAuthKey;
+            }
+            catch (Exception ex)
+            {
+                Log($"SetIpPort({IP})", ex);
+                throw;
+            }
         }
 
 
