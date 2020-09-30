@@ -80,6 +80,9 @@ namespace Encrypt
         /// <returns></returns>
         public static byte[] StringToByteArray(String hex)
         {
+            if (String.IsNullOrEmpty(hex))
+                return null;
+
             int NumberChars = hex.Length;
             byte[] bytes = new byte[NumberChars / 2];
             for (int i = 0; i < NumberChars; i += 2)
@@ -108,6 +111,8 @@ namespace Encrypt
 
         static public byte[] ByteHash(string paylaoad, byte[] Key)
         {
+            if (Key == null)
+                return null;
             HMACSHA256 hmac = new HMACSHA256(Key);
             byte[] buffer = Encoding.ASCII.GetBytes(paylaoad);
             return hmac.ComputeHash(buffer);

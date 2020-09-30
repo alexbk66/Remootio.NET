@@ -245,17 +245,21 @@ namespace Remootio
         }
 
 
-        protected class BASE_RESPONSE : BASE
+        public class RESPONSE : BASE
         {
             [JsonConstructor]
-            BASE_RESPONSE()
+            RESPONSE()
             {
             }
 
-            protected BASE_RESPONSE(type type) : base(type)
+            protected RESPONSE(type type) : base(type)
             {
             }
 
+            /// <summary>
+            /// Raw json data
+            /// </summary>
+            public string raw { get; set; }
 
             /// <summary>
             /// State open/closed (or no sensor)
@@ -287,49 +291,66 @@ namespace Remootio
             public bool? success { get; set; }
 
             /// <summary>
+            /// The field "relayTriggered" shows if Remootio's output relay was triggered during the action
+            /// Only used for replies to the actions, hense Nullable
+            /// </summary>
+            public bool? relayTriggered { get; set; }
+
+            /// <summary>
             /// Which key caused an event (Connected, RelayTrigger, etc?)
             /// </summary>
             public KeyData data { get; set; }
+
         }
 
 
-        protected class QUERY_RESPONSE : BASE_RESPONSE
-        {
-            [JsonConstructor]
-            public QUERY_RESPONSE() : base(type.QUERY) { }
-
-            public bool relayTriggered { get; set; }
-        }
-
-
-        /// <summary>
-        /// Remootio sends the following event if it any key has operated
-        /// the Remootio device  (triggered the control output)
-        /// </summary>
-        protected class RelayTrigger : BASE_RESPONSE
-        {
-            [JsonConstructor]
-            public RelayTrigger() : base(type.RelayTrigger) { }
-        }
-
-
-        /// <summary>
-        /// Remootio sends the following event if any key has connected to the Remootio device
-        /// </summary>
-        protected class Connected : BASE_RESPONSE
-        {
-            [JsonConstructor]
-            public Connected() : base(type.Connected) { }
-        }
-
-
-        protected class TRIGGER_RESPONSE : BASE_RESPONSE
-        {
-            [JsonConstructor]
-            public TRIGGER_RESPONSE() : base(type.TRIGGER) { }
-
-            public bool relayTriggered { get; set; }
-        }
+        // protected class QUERY_RESPONSE : RESPONSE
+        // {
+        //     [JsonConstructor]
+        //     public QUERY_RESPONSE() : base(type.QUERY) { }
+        // }
+        // 
+        // 
+        // protected class TRIGGER_RESPONSE : RESPONSE
+        // {
+        //     [JsonConstructor]
+        //     public TRIGGER_RESPONSE() : base(type.TRIGGER) { }
+        // }
+        // 
+        // 
+        // protected class OPEN_RESPONSE : RESPONSE
+        // {
+        //     [JsonConstructor]
+        //     public OPEN_RESPONSE() : base(type.OPEN) { }
+        // }
+        // 
+        // 
+        // protected class CLOSE_RESPONSE : RESPONSE
+        // {
+        //     [JsonConstructor]
+        //     public CLOSE_RESPONSE() : base(type.CLOSE) { }
+        // }
+        // 
+        // 
+        // /// <summary>
+        // /// Remootio sends the following event if it any key has operated
+        // /// the Remootio device  (triggered the control output)
+        // /// </summary>
+        // protected class RelayTrigger : RESPONSE
+        // {
+        //     [JsonConstructor]
+        //     public RelayTrigger() : base(type.RelayTrigger) { }
+        // }
+        // 
+        // 
+        // /// <summary>
+        // /// Remootio sends the following event if any key has connected to the Remootio device
+        // /// </summary>
+        // protected class Connected : RESPONSE
+        // {
+        //     [JsonConstructor]
+        //     public Connected() : base(type.Connected) { }
+        // }
 
 
 
@@ -387,12 +408,6 @@ namespace Remootio
 
         protected class QUERY : E_ACTION
         {
-            /// <summary>
-            /// 
-            /// </summary>
-            /// <param name="id">ActionID</param>
-            /// <param name="aes">AesEncryption</param>
-            /// <param name="sIV">Only for testing, normally pass null to generate</param>
             [JsonConstructor]
             public QUERY(int id, AesEncryption aes, string sIV = null)
                 : base(type.QUERY, id, aes, sIV)
@@ -403,15 +418,29 @@ namespace Remootio
 
         protected class TRIGGER : E_ACTION
         {
-            /// <summary>
-            /// 
-            /// </summary>
-            /// <param name="id">ActionID</param>
-            /// <param name="aes">AesEncryption</param>
-            /// <param name="sIV">Only for testing, normally pass null to generate</param>
             [JsonConstructor]
             public TRIGGER(int id, AesEncryption aes, string sIV = null)
                 : base(type.TRIGGER, id, aes, sIV)
+            {
+            }
+        }
+
+
+        protected class OPEN : E_ACTION
+        {
+            [JsonConstructor]
+            public OPEN(int id, AesEncryption aes, string sIV = null)
+                : base(type.OPEN, id, aes, sIV)
+            {
+            }
+        }
+
+
+        protected class CLOSE : E_ACTION
+        {
+            [JsonConstructor]
+            public CLOSE(int id, AesEncryption aes, string sIV = null)
+                : base(type.CLOSE, id, aes, sIV)
             {
             }
         }

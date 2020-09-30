@@ -33,6 +33,13 @@ namespace Remootio
 
 
         /// <summary>
+        /// For debugging communication
+        /// </summary>
+        [JsonProperty]
+        public bool LogComms { set; get; }
+
+
+        /// <summary>
         /// 
         /// </summary>
         public const string NewID = "New Remootio";
@@ -52,6 +59,7 @@ namespace Remootio
                 if (_id != null)
                     return _id;
 
+                // Until proper ID / SN is available from Remotio - use 6 letters from APIAuthKey
                 if (!String.IsNullOrEmpty(APIAuthKey))
                     return $"{APIAuthKey.Substring(0, 3)}-{APIAuthKey.Substring(APIAuthKey.Length-3)}";
                 else
@@ -338,10 +346,10 @@ namespace Remootio
                 this.IP = IP;
                 this.Port = port;
 
-                if (APISecretKey != null)
+                if (!String.IsNullOrEmpty(APISecretKey))
                     this.APISecretKey = APISecretKey;
 
-                if (APIAuthKey != null)
+                if (!String.IsNullOrEmpty(APIAuthKey))
                     this.APIAuthKey = APIAuthKey;
             }
             catch (Exception ex)
@@ -366,7 +374,7 @@ namespace Remootio
             if (websocket != null)
                 Stop();
 
-            if (BadIP)
+            if (BadIP || String.IsNullOrEmpty(APISecretKey) || String.IsNullOrEmpty(APIAuthKey))
                 return;
 
             aes = new AesEncryption(APISecretKey: APISecretKey);
@@ -595,8 +603,7 @@ namespace Remootio
         /// </summary>
         public void SendQuery()
         {
-            QUERY q = new QUERY(NextActionId, aes, sIV);
-            Send(q);
+            Send(new QUERY(NextActionId, aes, sIV));
         }
 
 
@@ -606,8 +613,27 @@ namespace Remootio
         /// </summary>
         public void SendTrigger()
         {
-            TRIGGER q = new TRIGGER(NextActionId, aes, sIV);
-            Send(q);
+            Send(new TRIGGER(NextActionId, aes, sIV));
+        }
+
+
+        /// <summary>
+        /// The API client sends this action to open the gate or the garage door. 
+        /// This will trigger Remootio's control output only if the gate or garage door status is "closed"
+        /// </summary>
+        public void SendOpen()
+        {
+            Send(new OPEN(NextActionId, aes, sIV));
+        }
+
+
+        /// <summary>
+        /// The API client sends this action to close the gate or the garage door
+        /// This will trigger Remootio's control output only if the gate or garage door status is "open"
+        /// </summary>
+        public void SendClose()
+        {
+            Send(new CLOSE(NextActionId, aes, sIV));
         }
 
 
@@ -619,6 +645,12 @@ namespace Remootio
 
         public class ConnectedEventArgs : EventArgs
         {
+            /// <summary>
+            /// EventArgs for WebSocket Connect/Disconnect
+            /// </summary>
+            /// <param name="connected"></param>
+            /// <param name="Code"></param>
+            /// <param name="Reason"></param>
             public ConnectedEventArgs(bool connected, ushort Code = 0, string Reason = null)
             {
                 this.connected = connected;
@@ -634,6 +666,12 @@ namespace Remootio
 
         public class LogEventArgs : EventArgs
         {
+            /// <summary>
+            /// EventArgs for logging messages/errors/exceptions
+            /// </summary>
+            /// <param name="message"></param>
+            /// <param name="error"></param>
+            /// <param name="ex"></param>
             public LogEventArgs(string message, bool error, Exception ex = null)
             {
                 this.error = error;
@@ -649,6 +687,12 @@ namespace Remootio
 
         public class StatusEventArgs : EventArgs
         {
+            /// <summary>
+            /// EventArgs for Remootio status update
+            /// </summary>
+            /// <param name="State"></param>
+            /// <param name="ErrorCode"></param>
+            /// <param name="Uptime"></param>
             public StatusEventArgs(string State, string ErrorCode, TimeSpan? Uptime)
             {
                 this.State = State;
@@ -662,9 +706,24 @@ namespace Remootio
         }
 
 
+        public class ResponseEventArgs : EventArgs
+        {
+            /// <summary>
+            /// EventArgs for notification of any message from HandleResponse
+            /// </summary>
+            public ResponseEventArgs(RESPONSE response)
+            {
+                this.response = response;
+            }
+
+            public RESPONSE response { get; }
+        }
+
+
         public event EventHandler<ConnectedEventArgs> OnConnectedChanged;
         public event EventHandler<LogEventArgs> OnLog;
         public event EventHandler<StatusEventArgs> OnStatus;
+        public event EventHandler<ResponseEventArgs> OnMessage;
 
 
         #endregion Client Events
@@ -688,11 +747,11 @@ namespace Remootio
             ReplyReceived = DateTime.Now;
 
             // Avoid double loogin, ProcessMessage will be called againg with proper type
-            if(type != type.NOTSET)
+            if(type != type.NOTSET && LogComms)
                 Log($"Received({type}): {json}");
 
-            // Note: Not every message is derived from BASE_RESPONSE
-            BASE_RESPONSE response = null;
+            // Note: Not every message is derived from RESPONSE
+            RESPONSE response = null;
 
             switch (type)
             {
@@ -740,38 +799,22 @@ namespace Remootio
 
                 //=== events from Remootio ===//
 
-                case type.RelayTrigger:
-                    response = JsonConvert.DeserializeObject<RelayTrigger>(json);
-                    break;
-
-
                 case type.Connected:
-                    response = JsonConvert.DeserializeObject<Connected>(json);
-                    break;
-
-
-                // Response to TRIGGER
+                case type.RelayTrigger:
                 case type.TRIGGER:
-                    response = JsonConvert.DeserializeObject<TRIGGER_RESPONSE>(json);
-                    break;
-
-
+                case type.OPEN:
+                case type.CLOSE:
+                case type.QUERY:
                 case type.StateChange:
-                    response = JsonConvert.DeserializeObject<BASE_RESPONSE>(json);
+                    response = JsonConvert.DeserializeObject<RESPONSE>(json);
                     break;
 
 
                 // Response to RESTART, or
                 // Restart event received
                 case type.Restart:
-                    response = JsonConvert.DeserializeObject<BASE_RESPONSE>(json);
+                    response = JsonConvert.DeserializeObject<RESPONSE>(json);
                     Log($"Device Restarted", error: true);
-                    break;
-
-
-                // Response to QUERY
-                case type.QUERY:
-                    response = JsonConvert.DeserializeObject<QUERY_RESPONSE>(json);
                     break;
 
 
@@ -781,7 +824,7 @@ namespace Remootio
                     try
                     {
                         // Just try if this unknown message is BASE_RESPONSE
-                        response = JsonConvert.DeserializeObject<BASE_RESPONSE>(json);
+                        response = JsonConvert.DeserializeObject<RESPONSE>(json);
                     }
                     catch (Exception ex)
                     {
@@ -789,8 +832,11 @@ namespace Remootio
                     break;
             }
 
+
+            // If any message derived from RESPONSE received - process it
             if (response != null)
             {
+                response.raw = json;
                 HandleResponse(response);
             }
 
@@ -857,10 +903,11 @@ namespace Remootio
 
 
         /// <summary>
-        /// COMMENT
+        /// Process most message types derived from RESPONSE here
+        /// Update LastActionId from the RESPONSE
         /// </summary>
-        /// <param name="response">QUERY_RESPONSE</param>
-        void HandleResponse(BASE_RESPONSE response)
+        /// <param name="response">RESPONSE</param>
+        void HandleResponse(RESPONSE response)
         {
             if (response == null)
                 return;
@@ -872,16 +919,19 @@ namespace Remootio
             State = response.state;
             Uptime = TimeSpan.FromMilliseconds(response.t100ms * 100);
 
-            Log($"State: '{State}' {(!String.IsNullOrEmpty(ErrorCode) ? " ErrorCode: '{ErrorCode}'" : "")} Uptime: {Uptime}");
+            if(LogComms)
+                Log($"State: '{State}' {(!String.IsNullOrEmpty(ErrorCode) ? $" ErrorCode: '{ErrorCode}'" : "")} Uptime: {Uptime}");
 
+            OnMessage?.Invoke(this, new ResponseEventArgs(response));
             OnStatus?.Invoke(this, new StatusEventArgs(State, ErrorCode, Uptime));
 
+            // Update LastActionId from the RESPONSE
             if (response.id != null && LastActionId <= response.id || (response.id == 0 && LastActionId == mask))
             {
                 // We increment the action id (we actually just set it to be equal to the previous message's ID we've sent)
                 LastActionId = (int)response.id;
 
-                Log($"Received response to last action, set LastActionId to {LastActionId}");
+                    Log($"Received response to last action, set LastActionId to {LastActionId}");
 
                 // First time received reply to QUERY - send also HELLO
                 if (apiVersion <= 0)
@@ -908,7 +958,8 @@ namespace Remootio
             try
             {
                 string json = JsonConvert.SerializeObject(msg);
-                Log($"Send: {json}");
+                if(LogComms)
+                    Log($"Send: {json}");
 
                 lock (websocket_lock)
                 {
