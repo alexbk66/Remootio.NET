@@ -799,13 +799,13 @@ namespace Remootio
 
                 //=== events from Remootio ===//
 
-                case type.Connected:
-                case type.RelayTrigger:
                 case type.TRIGGER:
                 case type.OPEN:
                 case type.CLOSE:
                 case type.QUERY:
                 case type.StateChange:
+                case type.ManualButtonPushed:
+                case type.DoorbellPushed:
                     response = JsonConvert.DeserializeObject<RESPONSE>(json);
                     break;
 
@@ -815,6 +815,17 @@ namespace Remootio
                 case type.Restart:
                     response = JsonConvert.DeserializeObject<RESPONSE>(json);
                     Log($"Device Restarted", error: true);
+                    break;
+
+
+                case type.Connected:
+                case type.RelayTrigger:
+                    response = JsonConvert.DeserializeObject<RESPONSE_WITH_KEY>(json);
+                    break;
+
+
+                case type.LeftOpen:
+                    response = JsonConvert.DeserializeObject<LeftOpen>(json);
                     break;
 
 

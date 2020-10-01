@@ -223,7 +223,7 @@ namespace Remootio
             /// <summary>
             /// shows which key has operated the device
             /// </summary>
-            public int keyNr { get; set; }
+            public int? keyNr { get; set; }
 
             /// <summary>
             /// "master key" - the key of the Remootio device's owner who has set it up
@@ -248,7 +248,7 @@ namespace Remootio
         public class RESPONSE : BASE
         {
             [JsonConstructor]
-            RESPONSE()
+            protected RESPONSE()
             {
             }
 
@@ -296,11 +296,56 @@ namespace Remootio
             /// </summary>
             public bool? relayTriggered { get; set; }
 
+        }
+
+
+        /// <summary>
+        /// Used for the following types:
+        /// Connected, RelayTrigger, KeyManagement
+        /// </summary>
+        public class RESPONSE_WITH_KEY : RESPONSE
+        {
+            [JsonConstructor]
+            RESPONSE_WITH_KEY()
+            {
+            }
+
+            protected RESPONSE_WITH_KEY(type type) : base(type)
+            {
+            }
+
+
             /// <summary>
             /// Which key caused an event (Connected, RelayTrigger, etc?)
             /// </summary>
             public KeyData data { get; set; }
+        }
 
+
+
+        public class LeftOpenData
+        {
+            /// <summary>
+            /// The field "timeOpen100ms" shows how long the gate has been left open in multiples of 100 ms
+            /// </summary>
+            public int timeOpen100ms { get; set; }
+        }
+
+        /// <summary>
+        /// Used for the following types:
+        /// Connected, RelayTrigger, KeyManagement
+        /// </summary>
+        public class LeftOpen : RESPONSE
+        {
+            [JsonConstructor]
+            LeftOpen() : base(type.LeftOpen)
+            {
+            }
+
+            /// <summary>
+            /// Which key caused an event (Connected, RelayTrigger, etc?)
+            /// </summary>
+            public LeftOpenData data { get; set; }
         }
 
 
