@@ -114,7 +114,7 @@ namespace Remootio
             {
                 _IP = value;
                 if (_IP != null)
-                    _IP = _IP.Replace("https", "").Replace("http", "").Replace("://", "").Trim();
+                    _IP = _IP.Replace("https", "").Replace("http", "").Replace("://", "").Trim().Trim('/');
 
                 _uri = null;
             }
